@@ -11,6 +11,7 @@ const APP_CONFIG = {
 
 const gridEl = document.getElementById("grid");
 const floorplanView = document.getElementById("floorplan-view");
+const floorplanInner = document.getElementById("floorplan-inner");
 const floorplanImage = document.getElementById("floorplan-image");
 const stepSelect = document.getElementById("step-select");
 const stepForm = document.getElementById("step-form");
@@ -70,7 +71,7 @@ function renderFloorplan(config, statusByNumber) {
     marker.disabled = status !== "free";
     marker.title = "Tisch " + t.number + (status === "free" ? "" : " (nicht verfügbar)");
     marker.addEventListener("click", () => selectTable(t.number));
-    floorplanView.appendChild(marker);
+    floorplanInner.appendChild(marker);
   });
 }
 
