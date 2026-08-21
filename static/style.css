@@ -103,26 +103,31 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .picker-btn.placed { border-color: #2fa84f; }
 .picker-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
 
-/* Floor plan containers (admin editor, public selector, admin dashboard):
-   the image is given a minimum width and the container scrolls
-   horizontally instead of letting the image shrink below that width.
-   Without this, marker circles (fixed pixel size) start overlapping each
-   other once the image gets small enough on narrow/mobile screens. */
-.plan-container, #floorplan-view, .dashboard-plan-container {
-  position: relative;
-  display: inline-block;
+/* Floor plan display (public table selector, admin editor, admin dashboard):
+   .plan-scroll is the outer, width-constrained, horizontally scrollable
+   viewport. .plan-inner has a FIXED width and is the positioned ancestor
+   for the marker dots — percentage-based left/top on the markers is always
+   resolved against this fixed width, so it stays correct and the markers
+   scroll together with the image regardless of screen size. Without the
+   fixed-width inner box, percentages would resolve against the outer
+   (visually clipped) box instead of the actual image size, causing markers
+   to be misplaced and not move together with the image while scrolling. */
+.plan-scroll {
   max-width: 100%;
-  margin-top: 8px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  margin-top: 8px;
 }
-.plan-container img, #floorplan-view img, .dashboard-plan-container img {
+.plan-inner {
+  position: relative;
+  width: 800px;
+}
+.plan-inner img {
   display: block;
+  width: 100%;
   border-radius: 8px;
-  max-width: 100%;
-  min-width: 640px;
 }
-.plan-container img { cursor: crosshair; }
+#plan-image { cursor: crosshair; }
 
 .plan-marker {
   position: absolute;
