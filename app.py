@@ -185,9 +185,12 @@ def init_db():
     if "voucher_code" not in reg_cols:
         db.execute("ALTER TABLE registrations ADD COLUMN voucher_code TEXT")
 
-    existing = db.execute("SELECT COUNT(*) FROM tables").fetchone()[0]
-    if existing == 0:
-        for i in range(1, NUM_TABLES + 1):
+    # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
+    # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
+    # tables instead of only seeding once on the very first run.
+    existing_max = db.execute("SELECT COALESCE(MAX(number), 0) FROM tables").fetchone()[0]
+    if existing_max < NUM_TABLES:
+        for i in range(existing_max + 1, NUM_TABLES + 1):
             db.execute("INSERT INTO tables (number, status) VALUES (?, 'free')", (i,))
     db.commit()
     db.close()
@@ -662,13 +665,21 @@ def admin_vouchers():
             prefix = (request.form.get("prefix") or "MA").strip() or "MA"
             created = []
             for _ in range(count):
-                code = f"{prefix}-{secrets.token_hex(4).upper()}"
-                db.execute(
-                    "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
-                    "VALUES (?, 1, 0, 1, ?)",
-                    (code, datetime.utcnow().isoformat()),
-                )
-                created.append(code)
+                for attempt in range(5):
+                    code = f"{prefix}-{secrets.token_hex(4).upper()}"
+                    try:
+                        db.execute(
+                            "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
+                            "VALUES (?, 1, 0, 1, ?)",
+                            (code, datetime.utcnow().isoformat()),
+                        )
+                        created.append(code)
+                        break
+                    except sqlite3.IntegrityError:
+                        # Extremely unlikely code collision – try again with a new one.
+                        continue
+                else:
+                    flash("Ein Code konnte nach mehreren Versuchen nicht eindeutig generiert werden – bitte erneut versuchen.")
             db.commit()
             if created:
                 flash(f"{len(created)} Einzel-Codes erstellt: " + ", ".join(created))
