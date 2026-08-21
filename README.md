@@ -5,8 +5,9 @@ register, pick a free table (either from a simple grid or an optional
 uploaded floor plan with clickable markers), and pay the table fee — either
 directly via PayPal (server-side Orders API v2, table booked immediately on
 payment) or via bank transfer (SEPA), where the table is held for 48 hours
-until an admin manually confirms the incoming payment. Unpaid PayPal holds
-expire automatically after 10 minutes.
+until an admin manually confirms the incoming payment. Which of the two
+payment methods are actually offered is configurable (see `PAYMENT_METHODS`
+below). Unpaid PayPal holds expire automatically after 10 minutes.
 
 Discounted prices for members are handled via voucher codes rather than
 automatic detection. An admin area (`/admin`) shows all registrations, lets
@@ -41,6 +42,7 @@ and a reverse proxy with HTTPS — HTTPS is required for live PayPal payments.
 | `PRICE_STANDARD` | Regular table fee | `15.00` |
 | `PRICE_INTERNAL` | Discounted fee applied with a valid voucher code | same as `PRICE_STANDARD` |
 | `CURRENCY` | ISO currency code for PayPal | `EUR` |
+| `PAYMENT_METHODS` | Which payment methods to offer: `paypal,sepa`, `sepa`, or `paypal`; invalid/empty falls back to both | `paypal,sepa` |
 | `PAYPAL_CLIENT_ID` | PayPal REST app Client ID | — |
 | `PAYPAL_CLIENT_SECRET` | PayPal REST app Secret | — |
 | `PAYPAL_MODE` | `sandbox` or `live` | `sandbox` |
@@ -60,10 +62,23 @@ and a reverse proxy with HTTPS — HTTPS is required for live PayPal payments.
 `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `ADMIN_PASSWORD`, and
 `SECRET_KEY` are required; everything else has a sensible default.
 
+## Which payment methods are offered
+
+Controlled by `PAYMENT_METHODS` (comma-separated, e.g. `paypal,sepa` for
+both, `sepa` for bank transfer only, `paypal` for PayPal only). With both
+enabled, visitors see a choice on the registration form; with only one
+enabled, the choice is hidden entirely and that method is used
+automatically — no code change needed, just restart the app with the new
+value. An invalid or empty value falls back to both being enabled.
+
+Note this is set once via the environment, not toggleable per-request from
+the admin UI — changing it requires updating `.env` (or the ConfigMap, in
+Kubernetes) and restarting the app.
+
 ## Bank transfer (SEPA) as a payment option
 
-At registration, visitors choose between PayPal and bank transfer. Bank
-transfer:
+At registration, visitors choose between PayPal and bank transfer (if both
+are enabled — see above). Bank transfer:
 1. Holds the table for `SEPA_HOLD_HOURS` (default 48h) instead of the
    10-minute PayPal hold.
 2. Immediately sends an email with the bank details, amount, and a payment
