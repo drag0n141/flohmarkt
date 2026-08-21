@@ -32,12 +32,14 @@
     <div class="card">
       <h2>Lageplan</h2>
       <p class="hint">Auf einen Tisch klicken, um zur zugehörigen Zeile zu springen.</p>
-      <div class="dashboard-plan-container">
-        <img src="{{ floorplan_image_url }}" alt="Lageplan">
-        {% for t in plan_tables %}
-        <a href="#table-{{ t.number }}" class="plan-table-marker {{ t.status }}"
-           style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}">{{ t.number }}</a>
-        {% endfor %}
+      <div class="plan-scroll dashboard-plan-container">
+        <div class="plan-inner">
+          <img src="{{ floorplan_image_url }}" alt="Lageplan">
+          {% for t in plan_tables %}
+          <a href="#table-{{ t.number }}" class="plan-table-marker {{ t.status }}"
+             style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}">{{ t.number }}</a>
+          {% endfor %}
+        </div>
       </div>
     </div>
     {% endif %}
