@@ -16,6 +16,7 @@ const floorplanImage = document.getElementById("floorplan-image");
 const stepSelect = document.getElementById("step-select");
 const stepForm = document.getElementById("step-form");
 const stepPay = document.getElementById("step-pay");
+const stepSepaPending = document.getElementById("step-sepa-pending");
 const stepDone = document.getElementById("step-done");
 
 async function loadFloorplanConfig() {
@@ -139,12 +140,16 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
   const errorEl = document.getElementById("form-error");
   errorEl.textContent = "";
 
+  const paymentMethodInput = document.querySelector('input[name="payment_method"]:checked');
+  const paymentMethod = paymentMethodInput ? paymentMethodInput.value : "paypal";
+
   const payload = {
     name: document.getElementById("name").value,
     email: document.getElementById("email").value,
     phone: document.getElementById("phone").value,
     table: selectedTable,
     voucher: document.getElementById("voucher").value,
+    payment_method: paymentMethod,
   };
 
   const res = await fetch("/api/register", {
@@ -161,12 +166,22 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
   }
 
   registrationId = data.registration_id;
-  document.getElementById("pay-table-label").textContent = "Tisch " + data.table;
-  document.getElementById("pay-price-label").textContent =
-    data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
   stepForm.hidden = true;
-  stepPay.hidden = false;
-  renderPaypalButtons();
+
+  if (data.payment_method === "sepa") {
+    document.getElementById("sepa-table-label").textContent = "Tisch " + data.table;
+    document.getElementById("sepa-price-label").textContent =
+      data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
+    document.getElementById("sepa-reference-label").textContent = data.reference;
+    document.getElementById("sepa-deadline-label").textContent = data.deadline;
+    stepSepaPending.hidden = false;
+  } else {
+    document.getElementById("pay-table-label").textContent = "Tisch " + data.table;
+    document.getElementById("pay-price-label").textContent =
+      data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
+    stepPay.hidden = false;
+    renderPaypalButtons();
+  }
 });
 
 function renderPaypalButtons() {
