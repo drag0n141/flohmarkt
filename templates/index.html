@@ -42,6 +42,18 @@
           <input type="text" id="voucher" placeholder="z. B. MG-1A2B3C">
         </label>
         <p id="voucher-feedback" class="hint"></p>
+
+        <label>Zahlungsart
+          <span class="payment-choice">
+            <label class="radio-inline">
+              <input type="radio" name="payment_method" value="paypal" checked> PayPal (sofort bezahlen)
+            </label>
+            <label class="radio-inline">
+              <input type="radio" name="payment_method" value="sepa"> Überweisung (Tisch 48h reserviert)
+            </label>
+          </span>
+        </label>
+
         <p class="price-display">Zu zahlen: <strong id="live-price-label"></strong></p>
         <div class="row">
           <button type="submit">Reservieren &amp; zur Zahlung</button>
@@ -58,6 +70,17 @@
          Bitte schließe die Zahlung ab, um den Tisch verbindlich zu buchen.</p>
       <div id="paypal-button-container"></div>
       <p id="pay-error" class="error"></p>
+    </div>
+
+    <div id="step-sepa-pending" class="card" hidden>
+      <h2>Reservierung erfolgreich 📬</h2>
+      <p>Tisch <strong id="sepa-table-label"></strong> ist bis zum
+         <strong id="sepa-deadline-label"></strong> für dich reserviert.
+         Zu zahlen: <strong id="sepa-price-label"></strong>, Verwendungszweck:
+         <strong id="sepa-reference-label"></strong>.</p>
+      <p class="hint">Die Bankverbindung und alle Details haben wir dir gerade per E-Mail geschickt.
+         Sobald deine Überweisung bei uns eingegangen und bestätigt ist, ist der Tisch verbindlich
+         gebucht. Geht die Zahlung nicht rechtzeitig ein, wird die Reservierung automatisch aufgehoben.</p>
     </div>
 
     <div id="step-done" class="card" hidden>
