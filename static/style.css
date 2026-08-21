@@ -90,8 +90,19 @@ button.secondary { background: #e5e7eb; color: #333; }
 
 .admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .admin-table th, .admin-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; }
-.admin-table th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+.admin-table th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; white-space: nowrap; }
 .admin-table tr:target { background: #fff8db; }
+
+/* Admin-Tabellen (Anmeldungen, Gutscheine) haben zu viele Spalten für schmale
+   Bildschirme. Statt die ganze Seite horizontal scrollen zu lassen (bricht
+   Header/Nav mit weg), scrollt hier nur der Tabellenbereich selbst; die
+   Mindestbreite hält Spalten lesbar statt sie zusammenzuquetschen. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll .admin-table { min-width: 720px; }
 
 .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; color: #fff; }
 .badge.paid { background: #2fa84f; }
@@ -188,3 +199,16 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 .hint.success { color: #2fa84f; }
 .hint.error-text { color: #c94b4b; }
 .price-display { font-size: 16px; margin-top: 4px; }
+
+/* Kleinere Bildschirme (Smartphones): etwas kompaktere Abstände, damit
+   Karten/Tabellen mehr nutzbare Breite haben statt Rand zu verschenken. */
+@media (max-width: 480px) {
+  .wrap { padding: 20px 12px 48px; }
+  .card { padding: 16px; }
+}
+
+/* Tablet: Formulare mit mehreren Feldern (Gutschein-Generierung etc.)
+   dürfen breiter nebeneinander stehen statt früh umzubrechen. */
+@media (min-width: 768px) {
+  .inline-form input { min-width: 200px; }
+}
