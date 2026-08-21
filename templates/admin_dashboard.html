@@ -12,7 +12,8 @@
       <h1>Tischübersicht</h1>
       <nav>
         <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
-        <a href="{{ url_for('admin_floorplan') }}">Lageplan verwalten</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
+        <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
         <a href="{{ url_for('admin_logout') }}">Abmelden</a>
       </nav>
     </div>
@@ -53,6 +54,7 @@
             <th>E-Mail</th>
             <th>Telefon</th>
             <th>Preis</th>
+            <th>Zahlungsart</th>
             <th>Gutschein</th>
             <th>Status</th>
             <th>Angemeldet am</th>
@@ -67,10 +69,18 @@
             <td>{{ r.email }}</td>
             <td>{{ r.phone or "–" }}</td>
             <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
+            <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</td>
             <td>{{ r.voucher_code or "–" }}</td>
             <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
             <td>{{ r.created_at[:16].replace("T", " ") }}</td>
-            <td>
+            <td class="row-actions">
+              {% if r.payment_method == 'sepa' and r.status == 'pending' %}
+              <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
+                    onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="secondary small">Zahlung bestätigen</button>
+              </form>
+              {% endif %}
               <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
                     onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -79,7 +89,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="9">Noch keine Anmeldungen.</td></tr>
+          <tr><td colspan="10">Noch keine Anmeldungen.</td></tr>
           {% endfor %}
         </tbody>
       </table>
