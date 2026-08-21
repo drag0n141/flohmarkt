@@ -103,8 +103,27 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .picker-btn.placed { border-color: #2fa84f; }
 .picker-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
 
-.plan-container { position: relative; display: inline-block; max-width: 100%; margin-top: 8px; }
-.plan-container img { max-width: 100%; display: block; border-radius: 8px; cursor: crosshair; }
+/* Floor plan containers (admin editor, public selector, admin dashboard):
+   the image is given a minimum width and the container scrolls
+   horizontally instead of letting the image shrink below that width.
+   Without this, marker circles (fixed pixel size) start overlapping each
+   other once the image gets small enough on narrow/mobile screens. */
+.plan-container, #floorplan-view, .dashboard-plan-container {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-container img, #floorplan-view img, .dashboard-plan-container img {
+  display: block;
+  border-radius: 8px;
+  max-width: 100%;
+  min-width: 640px;
+}
+.plan-container img { cursor: crosshair; }
+
 .plan-marker {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -118,9 +137,6 @@ button.small { padding: 6px 10px; font-size: 13px; }
   box-shadow: 0 0 0 2px #fff;
 }
 
-/* --- Öffentlicher Lageplan --- */
-#floorplan-view { position: relative; display: inline-block; max-width: 100%; }
-#floorplan-view img { max-width: 100%; display: block; border-radius: 8px; }
 .plan-table-marker {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -142,9 +158,6 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .plan-table-marker.held { background: #e0a300; cursor: not-allowed; opacity: 0.85; }
 .plan-table-marker.booked { background: #c94b4b; cursor: not-allowed; opacity: 0.85; }
 
-/* --- Lageplan im Admin-Dashboard (Tischübersicht) --- */
-.dashboard-plan-container { position: relative; display: inline-block; max-width: 100%; margin-top: 8px; }
-.dashboard-plan-container img { max-width: 100%; display: block; border-radius: 8px; }
 .dashboard-plan-container .plan-table-marker { cursor: pointer; }
 
 .inline-form { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
