@@ -48,7 +48,8 @@ PAYPAL_API_BASE = (
     else "https://api-m.paypal.com"
 )
 
-HOLD_MINUTES = 10  # how long a selected table stays reserved for payment
+HOLD_MINUTES = 10  # how long a PayPal table hold stays reserved for payment
+SEPA_HOLD_HOURS = int(os.environ.get("SEPA_HOLD_HOURS", 48))  # same, for bank transfer
 DB_PATH = os.environ.get("DB_PATH", "flohmarkt.db")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
@@ -157,7 +158,8 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',  -- pending, paid, cancelled
             created_at TEXT NOT NULL,
             price REAL,
-            voucher_code TEXT
+            voucher_code TEXT,
+            payment_method TEXT NOT NULL DEFAULT 'paypal'  -- paypal, sepa
         )
         """
     )
@@ -193,6 +195,8 @@ def init_db():
         db.execute("ALTER TABLE registrations ADD COLUMN price REAL")
     if "voucher_code" not in reg_cols:
         db.execute("ALTER TABLE registrations ADD COLUMN voucher_code TEXT")
+    if "payment_method" not in reg_cols:
+        db.execute("ALTER TABLE registrations ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'paypal'")
 
     # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
     # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
@@ -282,27 +286,32 @@ def login_required(view):
 
 def release_stale_holds(db):
     """Releases tables (and any reserved voucher codes) whose hold has expired
-    without payment having been completed."""
-    cutoff = (datetime.utcnow() - timedelta(minutes=HOLD_MINUTES)).isoformat()
+    without payment having been completed. PayPal holds expire after
+    HOLD_MINUTES; SEPA (bank transfer) holds get a much longer window
+    (SEPA_HOLD_HOURS), so each registration's own payment method decides
+    which cutoff applies to it."""
+    now = datetime.utcnow()
+    paypal_cutoff = (now - timedelta(minutes=HOLD_MINUTES)).isoformat()
+    sepa_cutoff = (now - timedelta(hours=SEPA_HOLD_HOURS)).isoformat()
 
     expired = db.execute(
-        "SELECT id, voucher_code FROM registrations WHERE status='pending' AND created_at < ?",
-        (cutoff,),
+        """
+        SELECT id, table_id, voucher_code FROM registrations
+        WHERE status='pending' AND (
+            (COALESCE(payment_method, 'paypal') = 'sepa' AND created_at < ?) OR
+            (COALESCE(payment_method, 'paypal') != 'sepa' AND created_at < ?)
+        )
+        """,
+        (sepa_cutoff, paypal_cutoff),
     ).fetchall()
+
     for reg in expired:
         release_voucher(db, reg["voucher_code"])
-
-    db.execute(
-        "UPDATE registrations SET status='cancelled' WHERE status='pending' AND created_at < ?",
-        (cutoff,),
-    )
-    db.execute(
-        """
-        UPDATE tables SET status='free', held_at=NULL, registration_id=NULL
-        WHERE status='held' AND held_at < ?
-        """,
-        (cutoff,),
-    )
+        db.execute("UPDATE registrations SET status='cancelled' WHERE id=?", (reg["id"],))
+        db.execute(
+            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL WHERE id=? AND status='held'",
+            (reg["table_id"],),
+        )
     db.commit()
 
 
@@ -381,33 +390,77 @@ def paypal_verify_webhook_signature(headers, event_body):
 
 
 # ---------------------------------------------------------------------------
-# Confirmation email
+# Editable email templates
 # ---------------------------------------------------------------------------
-def send_confirmation_email(to_email, name, table_number, price, voucher_code):
-    """Sends a payment confirmation email. Silently skipped (with a log line)
-    if SMTP is not configured; a send failure never breaks the payment flow,
-    since the table is already booked by this point."""
+DEFAULT_CONFIRMATION_SUBJECT = "Bestätigung: Tisch {{tisch}} beim Flohmarkt"
+DEFAULT_CONFIRMATION_BODY = """Hallo {{name}},
+
+vielen Dank für deine Zahlung – dein Tisch ist jetzt verbindlich gebucht.
+
+Tisch: {{tisch}}
+Standgebühr: {{preis}}
+
+Bis zum Flohmarkt!"""
+
+DEFAULT_SEPA_SUBJECT = "Deine Reservierung: Tisch {{tisch}} beim Flohmarkt (Überweisung)"
+DEFAULT_SEPA_BODY = """Hallo {{name}},
+
+dein Tisch ist für dich reserviert, bis die Zahlung bei uns eingegangen ist.
+
+Tisch: {{tisch}}
+Zu zahlender Betrag: {{preis}}
+Verwendungszweck: {{referenz}}
+
+Bitte überweise den Betrag bis spätestens {{frist}} an:
+
+IBAN: <bitte im Admin-Bereich unter E-Mail-Texte eintragen>
+BIC: <bitte eintragen>
+Kontoinhaber: <bitte eintragen>
+
+Geht die Zahlung nicht rechtzeitig bei uns ein, wird die Reservierung automatisch storniert.
+
+Bis zum Flohmarkt!"""
+
+EMAIL_TEMPLATE_DEFAULTS = {
+    "confirmation": (DEFAULT_CONFIRMATION_SUBJECT, DEFAULT_CONFIRMATION_BODY),
+    "sepa": (DEFAULT_SEPA_SUBJECT, DEFAULT_SEPA_BODY),
+}
+
+
+def render_email_template(template, **placeholders):
+    result = template
+    for key, value in placeholders.items():
+        result = result.replace("{{" + key + "}}", str(value))
+    return result
+
+
+def get_email_template(db, kind):
+    """kind: 'confirmation' or 'sepa'. Returns (subject, body) – whatever the
+    admin has customized via /admin/emails, falling back to the built-in
+    defaults above if not."""
+    default_subject, default_body = EMAIL_TEMPLATE_DEFAULTS[kind]
+    subject = get_setting(db, f"email_{kind}_subject", default_subject)
+    body = get_setting(db, f"email_{kind}_body", default_body)
+    return subject, body
+
+
+def send_templated_email(db, kind, to_email, **placeholders):
+    """Renders and sends one of the admin-editable email templates. Silently
+    skipped (with a log line) if SMTP is not configured; a send failure never
+    breaks the payment/registration flow that triggered it."""
     if not SMTP_HOST:
-        print("[email] SMTP_HOST not set – skipping confirmation email.")
+        print(f"[email] SMTP_HOST not set – skipping {kind} email.")
         return
 
-    body_lines = [
-        f"Hallo {name},",
-        "",
-        "vielen Dank für deine Zahlung – dein Tisch ist jetzt verbindlich gebucht.",
-        "",
-        f"Tisch: {table_number}",
-        f"Standgebühr: {price:.2f} {CURRENCY}",
-    ]
-    if voucher_code:
-        body_lines.append(f"Gutscheincode: {voucher_code}")
-    body_lines += ["", "Bis zum Flohmarkt!"]
+    subject_tpl, body_tpl = get_email_template(db, kind)
+    subject = render_email_template(subject_tpl, **placeholders)
+    body = render_email_template(body_tpl, **placeholders)
 
     msg = EmailMessage()
-    msg["Subject"] = f"Bestätigung: Tisch {table_number} beim Flohmarkt"
+    msg["Subject"] = subject
     msg["From"] = SMTP_FROM
     msg["To"] = to_email
-    msg.set_content("\n".join(body_lines))
+    msg.set_content(body)
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
@@ -417,24 +470,25 @@ def send_confirmation_email(to_email, name, table_number, price, voucher_code):
                 smtp.login(SMTP_USER, SMTP_PASSWORD)
             smtp.send_message(msg)
     except Exception as e:
-        # A failed email must not roll back or fail the already-completed payment.
-        print(f"[email] Failed to send confirmation email to {to_email}: {e}")
+        print(f"[email] Failed to send {kind} email to {to_email}: {e}")
 
 
 def finalize_paid_registration(db, reg):
     """Marks a registration as paid, books its table, and sends the
     confirmation email. Idempotent: safe to call twice for the same
-    registration (e.g. once via the browser's immediate capture call and
-    again via the async PayPal webhook) – the second call is a no-op."""
+    registration (e.g. once via the browser's immediate PayPal capture call
+    and again via the async PayPal webhook, or if an admin double-clicks the
+    SEPA confirmation button) – repeat calls are a no-op."""
     if reg["status"] == "paid":
         return
     if reg["status"] == "cancelled":
         # Payment arrived after the hold had already expired/been cancelled
         # (e.g. the browser closed right after paying, before the capture
-        # call could fire, and the webhook took over 10 minutes). Don't
-        # silently re-book – the table may meanwhile belong to someone else.
+        # call could fire, and the webhook took too long; or a SEPA transfer
+        # arrived after the 48h window). Don't silently re-book – the table
+        # may meanwhile belong to someone else.
         print(
-            f"[webhook] Payment for already-cancelled registration id={reg['id']} "
+            f"[payment] Payment for already-cancelled registration id={reg['id']} "
             "– needs manual follow-up in the admin area."
         )
         return
@@ -444,12 +498,14 @@ def finalize_paid_registration(db, reg):
     db.commit()
 
     table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
-    send_confirmation_email(
+    send_templated_email(
+        db,
+        "confirmation",
         reg["email"],
-        reg["name"],
-        table_row["number"] if table_row else "?",
-        reg["price"],
-        reg["voucher_code"],
+        name=reg["name"],
+        tisch=table_row["number"] if table_row else "?",
+        preis=f"{reg['price']:.2f} {CURRENCY}",
+        gutschein=reg["voucher_code"] or "",
     )
 
 
@@ -519,6 +575,7 @@ def api_register():
     phone = (data.get("phone") or "").strip()
     table_number = data.get("table")
     voucher_input = (data.get("voucher") or "").strip()
+    payment_method = data.get("payment_method") if data.get("payment_method") in ("paypal", "sepa") else "paypal"
 
     if not name or not email or not table_number:
         return jsonify({"error": "Name, E-Mail und Tisch sind Pflichtfelder."}), 400
@@ -541,28 +598,48 @@ def api_register():
         price = PRICE_INTERNAL
         voucher_code = voucher["code"]
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.utcnow()
+    now_iso = now.isoformat()
     cur = db.execute(
-        "INSERT INTO registrations (name, email, phone, table_id, status, created_at, price, voucher_code) "
-        "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
-        (name, email, phone, table["id"], now, price, voucher_code),
+        "INSERT INTO registrations "
+        "(name, email, phone, table_id, status, created_at, price, voucher_code, payment_method) "
+        "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+        (name, email, phone, table["id"], now_iso, price, voucher_code, payment_method),
     )
     registration_id = cur.lastrowid
 
     db.execute(
         "UPDATE tables SET status='held', held_at=?, registration_id=? WHERE id=?",
-        (now, registration_id, table["id"]),
+        (now_iso, registration_id, table["id"]),
     )
     db.commit()
 
-    return jsonify(
-        {
-            "registration_id": registration_id,
-            "table": table_number,
-            "price": price,
-            "voucher_applied": voucher_code is not None,
-        }
-    )
+    response = {
+        "registration_id": registration_id,
+        "table": table_number,
+        "price": price,
+        "voucher_applied": voucher_code is not None,
+        "payment_method": payment_method,
+    }
+
+    if payment_method == "sepa":
+        reference = f"FLOHMARKT-{registration_id}"
+        deadline_dt = now + timedelta(hours=SEPA_HOLD_HOURS)
+        deadline_str = deadline_dt.strftime("%d.%m.%Y um %H:%M Uhr")
+        send_templated_email(
+            db,
+            "sepa",
+            email,
+            name=name,
+            tisch=table_number,
+            preis=f"{price:.2f} {CURRENCY}",
+            referenz=reference,
+            frist=deadline_str,
+        )
+        response["reference"] = reference
+        response["deadline"] = deadline_str
+
+    return jsonify(response)
 
 
 @app.route("/api/create-order", methods=["POST"])
@@ -576,6 +653,8 @@ def api_create_order():
     reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
     if reg is None or reg["status"] != "pending":
         return jsonify({"error": "Registrierung nicht gefunden oder bereits abgeschlossen."}), 404
+    if reg["payment_method"] != "paypal":
+        return jsonify({"error": "Diese Registrierung nutzt keine PayPal-Zahlung."}), 400
 
     order = paypal_create_order(reg["price"], reference_id=str(registration_id))
     db.execute("UPDATE registrations SET paypal_order_id=? WHERE id=?", (order["id"], registration_id))
@@ -672,7 +751,7 @@ def admin_dashboard():
     rows = db.execute(
         """
         SELECT r.id, r.name, r.email, r.phone, r.status, r.created_at, r.price, r.voucher_code,
-               t.number AS table_number
+               r.payment_method, t.number AS table_number
         FROM registrations r
         JOIN tables t ON t.id = r.table_id
         WHERE r.status != 'cancelled'
@@ -719,6 +798,23 @@ def admin_cancel(registration_id):
         )
         db.commit()
         flash("Tisch wurde freigegeben.")
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/confirm-sepa/<int:registration_id>", methods=["POST"])
+@login_required
+def admin_confirm_sepa(registration_id):
+    db = get_db()
+    reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
+    if reg is None:
+        flash("Registrierung nicht gefunden.")
+    elif reg["payment_method"] != "sepa":
+        flash("Diese Registrierung nutzt keine Überweisung.")
+    elif reg["status"] != "pending":
+        flash("Diese Registrierung ist nicht mehr offen.")
+    else:
+        finalize_paid_registration(db, reg)
+        flash("Zahlung bestätigt – der Tisch ist jetzt gebucht.")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -796,6 +892,35 @@ def admin_vouchers():
         price_standard=PRICE_STANDARD,
         price_internal=PRICE_INTERNAL,
         currency=CURRENCY,
+    )
+
+
+@app.route("/admin/emails", methods=["GET", "POST"])
+@login_required
+def admin_emails():
+    db = get_db()
+
+    if request.method == "POST":
+        kind = request.form.get("kind")
+        if kind in ("confirmation", "sepa"):
+            subject = (request.form.get("subject") or "").strip()
+            body = (request.form.get("body") or "").strip()
+            if subject and body:
+                set_setting(db, f"email_{kind}_subject", subject)
+                set_setting(db, f"email_{kind}_body", body)
+                flash("E-Mail-Text wurde gespeichert.")
+            else:
+                flash("Betreff und Text dürfen nicht leer sein.")
+        return redirect(url_for("admin_emails"))
+
+    confirmation_subject, confirmation_body = get_email_template(db, "confirmation")
+    sepa_subject, sepa_body = get_email_template(db, "sepa")
+    return render_template(
+        "admin_emails.html",
+        confirmation_subject=confirmation_subject,
+        confirmation_body=confirmation_body,
+        sepa_subject=sepa_subject,
+        sepa_body=sepa_body,
     )
 
 
