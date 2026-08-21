@@ -1,20 +1,24 @@
-# Flohmarkt – Tischvergabe
+# Flohmarkt – Table Registration
 
-Kleine Flask-Webanwendung für die Vergabe von Flohmarkt-Tischen:
-Registrierung, Tischauswahl (mit Live-Belegungsstatus) und Bezahlung der
-Standgebühr direkt per PayPal. Die Zahlung wird **serverseitig** über die
-PayPal Orders API (v2) erstellt und erfasst – der Tisch wird erst nach
-bestätigter Zahlung endgültig gebucht.
+A small Flask web app for allocating tables at a flea market: registration,
+table selection (with live availability), and payment of the table fee
+directly via PayPal. Payment is created and captured **server-side** via the
+PayPal Orders API (v2) – a table is only finalized after payment is
+confirmed.
 
-## Ablauf
-1. Besucher wählt einen freien Tisch im Raster.
-2. Formular mit Name/E-Mail/Telefon → Tisch wird für 10 Minuten reserviert.
-3. PayPal-Zahlung über die eingebetteten Smart Buttons.
-4. Nach erfolgreicher Zahlung (serverseitig per Capture bestätigt) gilt der
-   Tisch als vergeben.
+The public-facing UI text (form labels, flash messages) is in German, as
+this app is built for a German-speaking flea market. Code, comments, and
+this README are in English since the repository is public.
 
-Nicht bezahlte Reservierungen laufen nach 10 Minuten automatisch ab und der
-Tisch wird wieder frei (Konstante `HOLD_MINUTES` in `app.py`).
+## Flow
+1. Visitor picks a free table from the grid.
+2. Form with name/email/phone → table is held for 10 minutes.
+3. PayPal payment via the embedded Smart Buttons.
+4. Once payment is confirmed (server-side capture), the table is marked as
+   booked.
+
+Unpaid holds expire automatically after 10 minutes and the table becomes
+free again (constant `HOLD_MINUTES` in `app.py`).
 
 ## Setup
 
@@ -24,148 +28,138 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# .env bearbeiten: NUM_TABLES, PRICE, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_MODE
+# edit .env: NUM_TABLES, PRICE_STANDARD, PRICE_INTERNAL, PAYPAL_CLIENT_ID,
+# PAYPAL_CLIENT_SECRET, PAYPAL_MODE, ADMIN_PASSWORD, SECRET_KEY
 ```
 
-### PayPal-Zugangsdaten
-1. Auf https://developer.paypal.com einloggen → "Apps & Credentials".
-2. Für Tests: Sandbox-App erstellen → Client ID + Secret in `.env` eintragen,
-   `PAYPAL_MODE=sandbox` lassen.
-3. Für den echten Flohmarkt: Live-App erstellen (erfordert ein verifiziertes
-   PayPal-Business-Konto), Client ID + Secret eintragen, `PAYPAL_MODE=live`.
+### PayPal credentials
+1. Log in at https://developer.paypal.com → "Apps & Credentials".
+2. For testing: create a sandbox app → enter Client ID + Secret in `.env`,
+   leave `PAYPAL_MODE=sandbox`.
+3. For the real event: create a live app (requires a verified PayPal
+   business account), enter Client ID + Secret, `PAYPAL_MODE=live`.
 
-### Starten (lokal/Test)
+### Running locally
 ```bash
 python app.py
 ```
 → http://localhost:5000
 
-### Produktivbetrieb
-Für den echten Einsatz nicht den eingebauten Dev-Server nutzen, sondern z. B.:
+### Production
+Don't use the built-in dev server for real traffic. Instead, e.g.:
 ```bash
 pip install gunicorn
 gunicorn -w 2 -b 0.0.0.0:8000 app:app
 ```
-dahinter einen Reverse Proxy mit HTTPS (nginx + Let's Encrypt). **HTTPS ist
-für PayPal-Live-Zahlungen zwingend erforderlich.**
+behind a reverse proxy with HTTPS (nginx + Let's Encrypt). **HTTPS is
+required for live PayPal payments.**
 
-## Ermäßigter Preis für interne Mitarbeiter
-Läuft über **Gutscheincodes** statt über eine automatische Erkennung – im
-Registrierungsformular gibt es ein optionales Feld "Gutscheincode". Ist der
-Code gültig und noch nicht (vollständig) eingelöst, gilt `PRICE_INTERNAL`
-statt `PRICE_STANDARD`; der tatsächlich zu zahlende Preis wird fest an der
-Anmeldung gespeichert.
+## Discounted price for staff/employees
+Handled via **voucher codes** rather than automatic detection – the
+registration form has an optional "voucher code" field. If the code is
+valid and not (fully) redeemed yet, `PRICE_INTERNAL` applies instead of
+`PRICE_STANDARD`; the actual price charged is stored permanently on the
+registration.
 
-Verwaltung unter `/admin/vouchers`:
-- **Einzelnen Code anlegen** – z. B. ein gemeinsamer Code für alle
-  Mitarbeiter mit hoher "Max. Nutzungen"-Zahl.
-- **Mehrere Einzel-Codes generieren** – erzeugt zufällige, je einmal
-  einlösbare Codes (z. B. für individuelle Verteilung).
-- Codes lassen sich deaktivieren oder löschen.
+Managed under `/admin/vouchers`:
+- **Create a single code** – e.g. one shared code for all staff with a high
+  "max uses" value.
+- **Generate multiple single-use codes** – creates random, single-use codes
+  (e.g. for individual distribution).
+- Codes can be deactivated or deleted.
 
-Ein Code wird bei der Registrierung reserviert (wie die Tischreservierung)
-und bei Ablauf der 10-Minuten-Frist oder manueller Stornierung im
-Admin-Bereich automatisch wieder freigegeben.
+A code is reserved at registration time (same as the table hold) and is
+automatically released again if the 10-minute hold expires or the
+registration is cancelled in the admin area.
 
-## Admin-Bereich
-Erreichbar unter `/admin/login` (Passwort aus `ADMIN_PASSWORD` in `.env`).
+## Admin area
+Available at `/admin/login` (password from `ADMIN_PASSWORD` in `.env`).
 
-- **Tischübersicht** (`/admin`): zeigt alle aktiven Anmeldungen mit Name,
-  E-Mail, Telefon, Tischnummer, gezahltem Preis, ggf. verwendetem
-  Gutscheincode und Status. Über "Freigeben" kann ein Tisch manuell wieder
-  freigegeben werden (z. B. bei Stornierung oder No-Show) – ein dabei
-  verwendeter Gutscheincode wird automatisch wieder nutzbar.
-- **Lageplan verwalten** (`/admin/floorplan`): Bild des Geländes hochladen
-  (ersetzt ein vorhandenes Bild) und anschließend jede Tischnummer per Klick
-  an die passende Stelle im Bild setzen. Sobald mindestens ein Tisch
-  positioniert ist, zeigt die öffentliche Startseite automatisch den
-  Lageplan mit farbigen Markern (grün=frei, gelb=reserviert, rot=vergeben)
-  statt des einfachen Rasters. Ohne Lageplan bleibt das Raster als Fallback
-  aktiv.
+- **Table overview** (`/admin`): shows all active registrations with name,
+  email, phone, table number, price paid, any voucher code used, and
+  status. "Release" manually frees a table (e.g. on cancellation or
+  no-show) – a voucher code used for it becomes usable again automatically.
+- **Manage floor plan** (`/admin/floorplan`): upload an image of the venue
+  (replaces any existing image), then click each table number onto the
+  right spot on the image. Once at least one table has a position, the
+  public homepage automatically shows the floor plan with colored markers
+  (green=free, yellow=held, red=booked) instead of the plain grid. Without
+  a floor plan, the grid remains the fallback.
 
-Login läuft über eine serverseitige Session (`SECRET_KEY` in `.env` setzen).
+Login uses a server-side session (set `SECRET_KEY` in `.env`).
 
-## Deployment im Kubernetes-Cluster
-Im Ordner `kubernetes/` liegen fertige Manifeste (Namespace, ConfigMap,
-ExternalSecret, PVC, Deployment/Service, HTTPRoute) sowie ein `Dockerfile`
-und eine GitHub-Actions-Pipeline (`.github/workflows/docker-publish.yml`),
-die das Image bei jedem Push nach `ghcr.io/<dein-user>/flohmarkt`
-baut und pusht (amd64 + arm64).
+## Deploying to a Kubernetes cluster
+A `kubernetes/` folder (kept outside this repo, provided separately) holds
+ready-made manifests (Namespace, ConfigMap, ExternalSecret, PVC,
+Deployment/Service, HTTPRoute), plus this repo's own `Dockerfile` and a
+GitHub Actions pipeline (`.github/workflows/docker-publish.yml`) that
+builds and pushes the image to `ghcr.io/<your-user>/flohmarkt` on every
+push (amd64 + arm64).
 
-**Ablauf:**
-1. Repo (inkl. `Dockerfile` und `.github/workflows/`) auf GitHub pushen –
-   die Pipeline baut automatisch das Image. Das GHCR-Package danach einmal
-   auf "public" stellen (oder ein `imagePullSecret` mit einem GHCR-Token
-   anlegen), sonst kann der Cluster es nicht ziehen.
-2. In 1Password ein Item `flohmarkt-tische` mit den Feldern
+**Flow:**
+1. Push this repo (including `Dockerfile` and `.github/workflows/`) to
+   GitHub – the pipeline builds the image automatically. Set the GHCR
+   package to "public" afterwards (or configure an `imagePullSecret` with a
+   GHCR token), otherwise the cluster can't pull it.
+2. Create a 1Password item `flohmarkt` (or similar) with the fields
    `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `ADMIN_PASSWORD`,
-   `SECRET_KEY` anlegen (passend zu deinem ESO/1Password-Connect-Setup).
-3. Die Dateien unter `kubernetes/apps/flohmarkt/flohmarkt-tische/` in dein
-   `home-ops`-Repo übernehmen. Anpassen:
-   - `app/pvc.yaml`: `storageClassName` an deine Rook-Ceph-StorageClass.
-   - `app/httproute.yaml`: `parentRefs` (Name/Namespace deines Envoy
-     Gateway) und `hostnames`.
-   - `app/externalsecret.yaml`: Name deines `ClusterSecretStore`.
-   - `ks.yaml`: Name deiner Flux `GitRepository`-Source.
-   - `app/deployment.yaml`: Image-Referenz, falls du kein `latest` willst
-     (empfehlenswert: von Renovate auf den Image-Digest pinnen lassen).
-4. Committen und pushen – Flux reconciled automatisch.
+   `SECRET_KEY`, matching your ESO / 1Password Connect setup.
+3. Adapt the manifests to your cluster (storage class, Gateway name and
+   hostname, secret store name, GitRepository source name, image
+   reference) and commit them to your infra repo.
+4. Push – Flux (or your GitOps tool) reconciles automatically.
 
-**Hinweise:**
-- SQLite verträgt nur einen gleichzeitigen Schreiber, daher `replicas: 1`
-  und `strategy: Recreate` im Deployment – bei einem Rollout gibt es kurz
-  Downtime, für diese Größenordnung unkritisch.
-- DB-Datei und hochgeladener Lageplan liegen auf **derselben PVC**, aber
-  über zwei `subPath`-Mounts getrennt (`/data` bzw.
-  `/app/static/uploads`), damit beides den Neustart übersteht.
-- `/admin` ist ausschließlich durch das eigene Passwort der App
-  geschützt, nicht durch eine cluster-weite ForwardAuth (Tinyauth) – bei
-  Bedarf lässt sich das über eine eigene `HTTPRoute`/`SecurityPolicy` nur
-  für den `/admin`-Pfad ergänzen.
-- Ohne eigenen `Dockerfile`-Build kannst du für einen ersten Test auch
-  einfach lokal mit `docker build -t flohmarkt-tische .` bauen und in
-  deine eigene Registry pushen.
+**Notes:**
+- SQLite only supports a single concurrent writer, so the app runs with
+  `replicas: 1` and a `Recreate` deployment strategy – a rollout causes
+  brief downtime, which is fine at this scale.
+- The DB file and the uploaded floor plan live on the **same PVC**, split
+  across two `subPath` mounts (`/data` and `/app/static/uploads`) so both
+  survive restarts.
+- `/admin` is protected solely by the app's own password, not by a
+  cluster-wide ForwardAuth (e.g. Tinyauth) – if needed, this can be added
+  via a dedicated `HTTPRoute`/`SecurityPolicy` scoped to the `/admin` path.
+- Without your own `Dockerfile` build, you can also test locally with
+  `docker build -t flohmarkt .` and push to your own registry.
 
-## Sicherheit
-Bereits eingebaut:
-- **CSRF-Schutz** (Flask-WTF) für alle Admin-Formulare und -AJAX-Calls; die
-  öffentliche JSON-API (`/api/...`) ist bewusst ausgenommen, da sie ohnehin
-  nicht cookie-basiert authentifiziert ist.
-- **Rate-Limiting** (Flask-Limiter) auf Login (`10/Minute`) und den
-  öffentlichen Endpunkten (`/api/register`, `/api/check-voucher` etc.,
-  `20–30/Minute`) gegen Brute-Force auf Passwort bzw. Gutscheincodes.
-- **Zeitkonstanter Passwortvergleich** (`hmac.compare_digest`) beim
-  Admin-Login.
-- **Echte Bildvalidierung** (Pillow) beim Lageplan-Upload statt reiner
-  Endungsprüfung, plus 8 MB Upload-Limit.
-- **Sichere Session-Cookies** (HttpOnly, SameSite=Lax, Secure – über
-  `SESSION_COOKIE_SECURE` in `.env` für lokale HTTP-Tests abschaltbar).
-- **Security-Header** (CSP ohne `unsafe-inline` für Skripte, X-Frame-Options,
-  X-Content-Type-Options, Referrer-Policy) via `after_request`.
-- `.gitignore` verhindert, dass `.env`, die SQLite-DB oder hochgeladene
-  Lagepläne versehentlich committet werden.
+## Security
+Already built in:
+- **CSRF protection** (Flask-WTF) for all admin forms and AJAX calls; the
+  public JSON API (`/api/...`) is deliberately exempt, since it isn't
+  cookie-authenticated anyway.
+- **Rate limiting** (Flask-Limiter) on login (`10/minute`) and the public
+  endpoints (`/api/register`, `/api/check-voucher`, etc., `20–30/minute`)
+  against brute-forcing the password or voucher codes.
+- **Constant-time password comparison** (`hmac.compare_digest`) for the
+  admin login.
+- **Real image validation** (Pillow) on floor plan uploads instead of just
+  checking the file extension, plus an 8 MB upload limit.
+- **Secure session cookies** (HttpOnly, SameSite=Lax, Secure – can be
+  disabled via `SESSION_COOKIE_SECURE` in `.env` for local HTTP testing).
+- **Security headers** (CSP without `unsafe-inline` for scripts,
+  X-Frame-Options, X-Content-Type-Options, Referrer-Policy) via
+  `after_request`.
+- `.gitignore` prevents `.env`, the SQLite DB, or uploaded floor plans from
+  being committed accidentally.
 
-Bewusst nicht eingebaut (für diese Größenordnung meist nicht nötig, aber
-gut zu wissen):
-- Kein Login-Lockout nach X Fehlversuchen (nur Rate-Limit) – bei Bedarf
-  z. B. über Flask-Limiter mit persistentem Storage (Redis) ausbaubar.
-- Rate-Limiting nutzt In-Memory-Storage – passend für `replicas: 1`, aber
-  nicht clusterweit synchron, falls doch mehrere Instanzen laufen sollten.
-- Kein Audit-Log für Admin-Aktionen.
+Deliberately not built in (usually unnecessary at this scale, but worth
+knowing):
+- No login lockout after X failed attempts (rate limiting only) – can be
+  extended via Flask-Limiter with persistent storage (Redis) if needed.
+- Rate limiting uses in-memory storage – fine for `replicas: 1`, but not
+  synchronized across instances if you were to run more than one.
+- No audit log for admin actions.
 
-## Anpassungen
-- Tischanzahl/Preis/Währung: über `.env` oder direkt am Kopf von `app.py`.
-- Datenbank ist eine einzelne SQLite-Datei (`flohmarkt.db`), wird beim
-  ersten Start automatisch angelegt.
-- Für eine Bestätigungs-E-Mail nach Zahlung: in `api_capture_order()` in
-  `app.py` einen Mailversand ergänzen (z. B. mit `smtplib` oder einem
-  Mail-API-Dienst).
+## Customization
+- Table count/price/currency: via `.env` or directly at the top of
+  `app.py`.
+- The database is a single SQLite file (`flohmarkt.db`), created
+  automatically on first start.
+- For a confirmation email after payment: add mail sending (e.g. via
+  `smtplib` or a mail API service) inside `api_capture_order()` in
+  `app.py`.
 
-## Bekannte Grenzen
-- Race Conditions bei gleichzeitiger Auswahl desselben Tisches werden über
-  den DB-Status abgefangen (`409`-Fehler, Grid/Lageplan wird neu geladen).
-- Der Admin-Login ist ein einzelnes gemeinsames Passwort (kein
-  Mehrbenutzer-System mit eigenen Accounts).
-- Für eine Bestätigungs-E-Mail nach Zahlung: in `api_capture_order()` in
-  `app.py` einen Mailversand ergänzen (z. B. mit `smtplib` oder einem
-  Mail-API-Dienst).
+## Known limitations
+- Race conditions from simultaneously selecting the same table are caught
+  via the DB status (`409` error, grid/floor plan reloads).
+- Admin login is a single shared password (no multi-user account system).
