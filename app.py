@@ -184,6 +184,12 @@ def init_db():
     db.close()
 
 
+# Called at import time so the schema exists whether the app is started via
+# `python app.py` or via a WSGI server like gunicorn (which only imports the
+# module and never runs the `__main__` block below).
+init_db()
+
+
 def get_setting(db, key, default=None):
     row = db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else default
@@ -680,6 +686,5 @@ def admin_clear_position():
 
 
 if __name__ == "__main__":
-    init_db()
     debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     app.run(debug=debug_mode, host="0.0.0.0", port=5000)
