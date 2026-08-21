@@ -51,14 +51,16 @@
         </div>
         <p id="picker-status" class="hint">Kein Tisch ausgewählt.</p>
 
-        <div id="plan-container" class="plan-container">
-          <img id="plan-image" src="{{ image_url }}" alt="Lageplan">
-          {% for t in tables %}
-            {% if t.pos_x is not none %}
-            <div class="plan-marker" data-number="{{ t.number }}"
-                 style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;">{{ t.number }}</div>
-            {% endif %}
-          {% endfor %}
+        <div id="plan-container" class="plan-scroll">
+          <div id="plan-inner" class="plan-inner">
+            <img id="plan-image" src="{{ image_url }}" alt="Lageplan">
+            {% for t in tables %}
+              {% if t.pos_x is not none %}
+              <div class="plan-marker" data-number="{{ t.number }}"
+                   style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;">{{ t.number }}</div>
+              {% endif %}
+            {% endfor %}
+          </div>
         </div>
       </div>
     </div>
