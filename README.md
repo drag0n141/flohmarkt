@@ -6,7 +6,7 @@ uploaded floor plan with clickable markers), and pay the table fee directly
 via PayPal (server-side Orders API v2 – a table is only booked once payment
 is confirmed). Unpaid holds expire automatically after 10 minutes.
 
-Discounted prices for staff are handled via voucher codes rather than
+Discounted prices for members are handled via voucher codes rather than
 automatic detection. An admin area (`/admin`) shows all registrations and
 lets you manage the floor plan and voucher codes.
 
