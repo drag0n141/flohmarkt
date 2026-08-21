@@ -587,12 +587,25 @@ def admin_dashboard():
         "SELECT status, COUNT(*) AS n FROM tables GROUP BY status"
     ).fetchall()
     stats = {r["status"]: r["n"] for r in stats}
+
+    image = get_setting(db, "floorplan_image")
+    plan_tables = db.execute(
+        """
+        SELECT number, status, pos_x, pos_y
+        FROM tables
+        WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
+        ORDER BY number
+        """
+    ).fetchall()
+
     return render_template(
         "admin_dashboard.html",
         registrations=rows,
         stats=stats,
         num_tables=NUM_TABLES,
         currency=CURRENCY,
+        floorplan_image_url=url_for("static", filename=f"uploads/{image}") if image else None,
+        plan_tables=plan_tables,
     )
 
 
