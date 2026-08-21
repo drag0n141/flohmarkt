@@ -9,7 +9,7 @@
 <body>
   <div class="wrap wide">
     <div class="admin-header">
-      <h1>Gutscheincodes (Mitarbeiterpreis)</h1>
+      <h1>Gutscheincodes (Mitgliederrabatt)</h1>
       <nav>
         <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
         <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
@@ -28,11 +28,11 @@
 
     <div class="card">
       <h2>Einzelnen Code anlegen</h2>
-      <p class="hint">Z. B. ein gemeinsamer Code für alle Mitarbeiter mit hoher Nutzungszahl.</p>
+      <p class="hint">Z. B. ein gemeinsamer Code für alle Mitglieder mit hoher Nutzungszahl.</p>
       <form method="post" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="create">
-        <label>Code<input type="text" name="code" placeholder="z. B. MITARBEITER2026" required></label>
+        <label>Code<input type="text" name="code" placeholder="z. B. MITGLIEDER2026" required></label>
         <label>Max. Nutzungen<input type="number" name="max_uses" value="1" min="1"></label>
         <button type="submit">Anlegen</button>
       </form>
@@ -41,7 +41,7 @@
     <div class="card">
       <h2>Mehrere Einzel-Codes generieren</h2>
       <p class="hint">Erzeugt zufällige, jeweils einmal einlösbare Codes – z. B. um jedem
-        Mitarbeiter einen eigenen Code zukommen zu lassen.</p>
+        Mitglied einen eigenen Code zukommen zu lassen.</p>
       <form method="post" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="bulk_generate">
