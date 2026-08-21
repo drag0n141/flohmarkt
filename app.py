@@ -647,7 +647,12 @@ def api_register():
     }
 
     if payment_method == "sepa":
-        reference = f"FLOHMARKT-{registration_id}"
+        # Uses the table number rather than the registration id, per request –
+        # simpler for visitors to read out/type, at the cost of the reference
+        # no longer being globally unique (a table re-registered via SEPA
+        # after an earlier hold expired or was cancelled reuses the same
+        # reference).
+        reference = f"FLOHMARKT-{table_number}"
         deadline_dt = now + timedelta(hours=SEPA_HOLD_HOURS)
         deadline_str = deadline_dt.strftime("%d.%m.%Y um %H:%M Uhr")
         send_templated_email(
