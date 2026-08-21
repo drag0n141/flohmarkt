@@ -46,53 +46,55 @@
     {% endif %}
 
     <div class="card">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Tisch</th>
-            <th>Name</th>
-            <th>E-Mail</th>
-            <th>Telefon</th>
-            <th>Preis</th>
-            <th>Zahlungsart</th>
-            <th>Gutschein</th>
-            <th>Status</th>
-            <th>Angemeldet am</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in registrations %}
-          <tr id="table-{{ r.table_number }}">
-            <td>{{ r.table_number }}</td>
-            <td>{{ r.name }}</td>
-            <td>{{ r.email }}</td>
-            <td>{{ r.phone or "–" }}</td>
-            <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
-            <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</td>
-            <td>{{ r.voucher_code or "–" }}</td>
-            <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
-            <td>{{ r.created_at[:16].replace("T", " ") }}</td>
-            <td class="row-actions">
-              {% if r.payment_method == 'sepa' and r.status == 'pending' %}
-              <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
-                    onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="secondary small">Zahlung bestätigen</button>
-              </form>
-              {% endif %}
-              <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
-                    onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="secondary small">Freigeben</button>
-              </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="10">Noch keine Anmeldungen.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Tisch</th>
+              <th>Name</th>
+              <th>E-Mail</th>
+              <th>Telefon</th>
+              <th>Preis</th>
+              <th>Zahlungsart</th>
+              <th>Gutschein</th>
+              <th>Status</th>
+              <th>Angemeldet am</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in registrations %}
+            <tr id="table-{{ r.table_number }}">
+              <td>{{ r.table_number }}</td>
+              <td>{{ r.name }}</td>
+              <td>{{ r.email }}</td>
+              <td>{{ r.phone or "–" }}</td>
+              <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
+              <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</td>
+              <td>{{ r.voucher_code or "–" }}</td>
+              <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+              <td>{{ r.created_at[:16].replace("T", " ") }}</td>
+              <td class="row-actions">
+                {% if r.payment_method == 'sepa' and r.status == 'pending' %}
+                <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
+                      onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="secondary small">Zahlung bestätigen</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
+                      onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="secondary small">Freigeben</button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="10">Noch keine Anmeldungen.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </body>
