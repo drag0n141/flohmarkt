@@ -2,8 +2,10 @@ import hmac
 import io
 import os
 import secrets
+import smtplib
 import sqlite3
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from functools import wraps
 
 import requests
@@ -51,6 +53,13 @@ DB_PATH = os.environ.get("DB_PATH", "flohmarkt.db")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "please-change-in-.env")
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
+SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
@@ -332,6 +341,47 @@ def paypal_capture_order(order_id):
 
 
 # ---------------------------------------------------------------------------
+# Confirmation email
+# ---------------------------------------------------------------------------
+def send_confirmation_email(to_email, name, table_number, price, voucher_code):
+    """Sends a payment confirmation email. Silently skipped (with a log line)
+    if SMTP is not configured; a send failure never breaks the payment flow,
+    since the table is already booked by this point."""
+    if not SMTP_HOST:
+        print("[email] SMTP_HOST not set – skipping confirmation email.")
+        return
+
+    body_lines = [
+        f"Hallo {name},",
+        "",
+        "vielen Dank für deine Zahlung – dein Tisch ist jetzt verbindlich gebucht.",
+        "",
+        f"Tisch: {table_number}",
+        f"Standgebühr: {price:.2f} {CURRENCY}",
+    ]
+    if voucher_code:
+        body_lines.append(f"Gutscheincode: {voucher_code}")
+    body_lines += ["", "Bis zum Flohmarkt!"]
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Bestätigung: Tisch {table_number} beim Flohmarkt"
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg.set_content("\n".join(body_lines))
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+            if SMTP_USE_TLS:
+                smtp.starttls()
+            if SMTP_USER:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.send_message(msg)
+    except Exception as e:
+        # A failed email must not roll back or fail the already-completed payment.
+        print(f"[email] Failed to send confirmation email to {to_email}: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
@@ -480,6 +530,16 @@ def api_capture_order():
         db.execute("UPDATE registrations SET status='paid' WHERE id=?", (reg["id"],))
         db.execute("UPDATE tables SET status='booked' WHERE id=?", (reg["table_id"],))
         db.commit()
+
+        table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+        send_confirmation_email(
+            reg["email"],
+            reg["name"],
+            table_row["number"] if table_row else "?",
+            reg["price"],
+            reg["voucher_code"],
+        )
+
         return jsonify({"status": "paid"})
 
     return jsonify({"error": "Zahlung nicht abgeschlossen.", "paypal_status": status}), 402
