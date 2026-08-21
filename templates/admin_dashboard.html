@@ -57,6 +57,7 @@
             <td>
               <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
                     onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="secondary small">Freigeben</button>
               </form>
             </td>

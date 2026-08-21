@@ -6,7 +6,10 @@
 <title>Flohmarkt – Tischvergabe</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body data-has-paypal="{{ 'true' if paypal_client_id else 'false' }}"
+      data-price-standard="{{ price_standard }}"
+      data-price-internal="{{ price_internal }}"
+      data-currency="{{ currency }}">
   <div class="wrap">
     <h1>Flohmarkt – Tischvergabe</h1>
     <p class="subtitle">Standgebühr pro Tisch: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong>
@@ -65,14 +68,6 @@
   {% if paypal_client_id %}
   <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency={{ currency }}"></script>
   {% endif %}
-  <script>
-    window.APP_CONFIG = {
-      hasPaypalClientId: {{ 'true' if paypal_client_id else 'false' }},
-      priceStandard: {{ price_standard }},
-      priceInternal: {{ price_internal }},
-      currency: "{{ currency }}"
-    };
-  </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

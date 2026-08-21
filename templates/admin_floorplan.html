@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>Admin – Lageplan</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -26,6 +27,7 @@
       <p class="hint">Ein Bild des Flohmarkt-Geländes (Skizze/Grundriss), auf dem anschließend
         die Tische als Punkte platziert werden. Ein neuer Upload ersetzt das bisherige Bild.</p>
       <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="file" name="floorplan" accept=".png,.jpg,.jpeg,.webp" required>
         <button type="submit">Hochladen</button>
       </form>

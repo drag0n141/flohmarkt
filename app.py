@@ -1,3 +1,5 @@
+import hmac
+import io
 import os
 import secrets
 import sqlite3
@@ -17,6 +19,11 @@ from flask import (
     url_for,
     flash,
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf import CSRFProtect
+from PIL import Image, UnidentifiedImageError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 load_dotenv()
@@ -52,6 +59,40 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+
+# Hinter einem Reverse Proxy (Envoy Gateway o. ä.) – für korrekte Client-IPs
+# bei Rate-Limiting und Logging.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Hinter HTTPS (Standardfall im Cluster) auf True lassen; für lokales
+    # Testen ohne HTTPS über SESSION_COOKIE_SECURE=false in .env abschaltbar.
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "true").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=8 * 1024 * 1024,  # 8 MB – begrenzt u. a. Lageplan-Uploads
+    WTF_CSRF_TIME_LIMIT=None,  # Token soll nicht mitten in einer Admin-Session ablaufen
+)
+
+csrf = CSRFProtect(app)
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://www.paypal.com https://www.paypalobjects.com; "
+        "frame-src https://www.paypal.com; "
+        "connect-src 'self' https://www.paypal.com; "
+        "img-src 'self' https://www.paypalobjects.com data:; "
+        "style-src 'self' 'unsafe-inline'"
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +200,17 @@ def set_setting(db, key, value):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def is_valid_image(file_bytes):
+    """Prüft anhand des tatsächlichen Dateiinhalts (nicht nur der Endung), ob es
+    sich um ein echtes, decodierbares Bild handelt."""
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        img.verify()
+        return True
+    except (UnidentifiedImageError, Exception):
+        return False
 
 
 def reserve_voucher(db, code):
@@ -311,6 +363,7 @@ def api_floorplan_config():
 
 
 @app.route("/api/check-voucher")
+@limiter.limit("30 per minute")
 def api_check_voucher():
     """Prüft einen Gutscheincode, OHNE ihn zu reservieren – für die Live-Anzeige
     im Formular, bevor tatsächlich registriert wird."""
@@ -329,6 +382,8 @@ def api_check_voucher():
 
 
 @app.route("/api/register", methods=["POST"])
+@csrf.exempt
+@limiter.limit("20 per minute")
 def api_register():
     data = request.get_json(force=True)
     name = (data.get("name") or "").strip()
@@ -383,6 +438,8 @@ def api_register():
 
 
 @app.route("/api/create-order", methods=["POST"])
+@csrf.exempt
+@limiter.limit("20 per minute")
 def api_create_order():
     data = request.get_json(force=True)
     registration_id = data.get("registration_id")
@@ -399,6 +456,8 @@ def api_create_order():
 
 
 @app.route("/api/capture-order", methods=["POST"])
+@csrf.exempt
+@limiter.limit("20 per minute")
 def api_capture_order():
     data = request.get_json(force=True)
     order_id = data.get("order_id")
@@ -424,10 +483,12 @@ def api_capture_order():
 # Admin-Bereich
 # ---------------------------------------------------------------------------
 @app.route("/admin/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def admin_login():
     if request.method == "POST":
         password = request.form.get("password", "")
-        if ADMIN_PASSWORD and password == ADMIN_PASSWORD:
+        if ADMIN_PASSWORD and hmac.compare_digest(password.encode(), ADMIN_PASSWORD.encode()):
+            session.permanent = True
             session["is_admin"] = True
             next_url = request.args.get("next") or url_for("admin_dashboard")
             return redirect(next_url)
@@ -522,7 +583,7 @@ def admin_vouchers():
             prefix = (request.form.get("prefix") or "MA").strip() or "MA"
             created = []
             for _ in range(count):
-                code = f"{prefix}-{secrets.token_hex(3).upper()}"
+                code = f"{prefix}-{secrets.token_hex(4).upper()}"
                 db.execute(
                     "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
                     "VALUES (?, 1, 0, 1, ?)",
@@ -563,6 +624,11 @@ def admin_floorplan():
     if request.method == "POST":
         file = request.files.get("floorplan")
         if file and file.filename and allowed_file(file.filename):
+            file_bytes = file.read()
+            if not is_valid_image(file_bytes):
+                flash("Die Datei ist kein gültiges Bild.")
+                return redirect(url_for("admin_floorplan"))
+
             old_image = get_setting(db, "floorplan_image")
             if old_image:
                 old_path = os.path.join(UPLOAD_FOLDER, old_image)
@@ -570,7 +636,8 @@ def admin_floorplan():
                     os.remove(old_path)
             ext = secure_filename(file.filename).rsplit(".", 1)[1].lower()
             filename = f"floorplan.{ext}"
-            file.save(os.path.join(UPLOAD_FOLDER, filename))
+            with open(os.path.join(UPLOAD_FOLDER, filename), "wb") as f:
+                f.write(file_bytes)
             set_setting(db, "floorplan_image", filename)
             flash("Lageplan wurde hochgeladen.")
         else:
@@ -614,4 +681,5 @@ def admin_clear_position():
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(debug=debug_mode, host="0.0.0.0", port=5000)

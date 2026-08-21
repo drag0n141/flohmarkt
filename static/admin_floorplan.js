@@ -3,6 +3,7 @@ let selectedNumber = null;
 const statusEl = document.getElementById("picker-status");
 const planContainer = document.getElementById("plan-container");
 const planImage = document.getElementById("plan-image");
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
 document.querySelectorAll(".picker-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -26,7 +27,7 @@ if (planImage) {
 
     await fetch("/admin/api/set-position", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
       body: JSON.stringify({ number: selectedNumber, x, y }),
     });
 

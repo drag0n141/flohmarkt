@@ -2,6 +2,13 @@ let selectedTable = null;
 let registrationId = null;
 let floorplanConfig = null; // { image_url, tables: [{number, x, y}] } oder null
 
+const APP_CONFIG = {
+  hasPaypalClientId: document.body.dataset.hasPaypal === "true",
+  priceStandard: parseFloat(document.body.dataset.priceStandard),
+  priceInternal: parseFloat(document.body.dataset.priceInternal),
+  currency: document.body.dataset.currency,
+};
+
 const gridEl = document.getElementById("grid");
 const floorplanView = document.getElementById("floorplan-view");
 const floorplanImage = document.getElementById("floorplan-image");
@@ -83,7 +90,7 @@ function formatPrice(amount) {
 }
 
 function updateLivePrice(voucherValid) {
-  const cfg = window.APP_CONFIG;
+  const cfg = APP_CONFIG;
   const amount = voucherValid ? cfg.priceInternal : cfg.priceStandard;
   document.getElementById("live-price-label").textContent =
     formatPrice(amount) + (voucherValid ? " (Mitarbeiterpreis)" : "");
