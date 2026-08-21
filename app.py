@@ -61,6 +61,8 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
 SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
+PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
@@ -343,6 +345,34 @@ def paypal_capture_order(order_id):
     return resp.json()
 
 
+def paypal_verify_webhook_signature(headers, event_body):
+    """Verifies that a webhook POST genuinely came from PayPal, using PayPal's
+    own verification endpoint (simpler and less error-prone than reimplementing
+    the certificate/signature check locally)."""
+    if not PAYPAL_WEBHOOK_ID:
+        print("[webhook] PAYPAL_WEBHOOK_ID not set – rejecting webhook.")
+        return False
+
+    token = paypal_get_access_token()
+    payload = {
+        "transmission_id": headers.get("Paypal-Transmission-Id"),
+        "transmission_time": headers.get("Paypal-Transmission-Time"),
+        "cert_url": headers.get("Paypal-Cert-Url"),
+        "auth_algo": headers.get("Paypal-Auth-Algo"),
+        "transmission_sig": headers.get("Paypal-Transmission-Sig"),
+        "webhook_id": PAYPAL_WEBHOOK_ID,
+        "webhook_event": event_body,
+    }
+    resp = requests.post(
+        f"{PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json().get("verification_status") == "SUCCESS"
+
+
 # ---------------------------------------------------------------------------
 # Confirmation email
 # ---------------------------------------------------------------------------
@@ -382,6 +412,38 @@ def send_confirmation_email(to_email, name, table_number, price, voucher_code):
     except Exception as e:
         # A failed email must not roll back or fail the already-completed payment.
         print(f"[email] Failed to send confirmation email to {to_email}: {e}")
+
+
+def finalize_paid_registration(db, reg):
+    """Marks a registration as paid, books its table, and sends the
+    confirmation email. Idempotent: safe to call twice for the same
+    registration (e.g. once via the browser's immediate capture call and
+    again via the async PayPal webhook) – the second call is a no-op."""
+    if reg["status"] == "paid":
+        return
+    if reg["status"] == "cancelled":
+        # Payment arrived after the hold had already expired/been cancelled
+        # (e.g. the browser closed right after paying, before the capture
+        # call could fire, and the webhook took over 10 minutes). Don't
+        # silently re-book – the table may meanwhile belong to someone else.
+        print(
+            f"[webhook] Payment for already-cancelled registration id={reg['id']} "
+            "– needs manual follow-up in the admin area."
+        )
+        return
+
+    db.execute("UPDATE registrations SET status='paid' WHERE id=?", (reg["id"],))
+    db.execute("UPDATE tables SET status='booked' WHERE id=?", (reg["table_id"],))
+    db.commit()
+
+    table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+    send_confirmation_email(
+        reg["email"],
+        reg["name"],
+        table_row["number"] if table_row else "?",
+        reg["price"],
+        reg["voucher_code"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -530,22 +592,46 @@ def api_capture_order():
     status = result.get("status")
 
     if status == "COMPLETED":
-        db.execute("UPDATE registrations SET status='paid' WHERE id=?", (reg["id"],))
-        db.execute("UPDATE tables SET status='booked' WHERE id=?", (reg["table_id"],))
-        db.commit()
-
-        table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
-        send_confirmation_email(
-            reg["email"],
-            reg["name"],
-            table_row["number"] if table_row else "?",
-            reg["price"],
-            reg["voucher_code"],
-        )
-
+        finalize_paid_registration(db, reg)
         return jsonify({"status": "paid"})
 
     return jsonify({"error": "Zahlung nicht abgeschlossen.", "paypal_status": status}), 402
+
+
+@app.route("/webhooks/paypal", methods=["POST"])
+@csrf.exempt
+@limiter.limit("60 per minute")
+def paypal_webhook():
+    """Server-to-server notification from PayPal – the safety net in case the
+    browser's own /api/capture-order call never arrives (e.g. tab closed
+    right after paying). Every request is signature-verified against
+    PAYPAL_WEBHOOK_ID before anything in it is trusted."""
+    try:
+        event = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "invalid json"}), 400
+
+    if not event or not paypal_verify_webhook_signature(request.headers, event):
+        return jsonify({"error": "invalid signature"}), 400
+
+    if event.get("event_type") == "PAYMENT.CAPTURE.COMPLETED":
+        order_id = (
+            event.get("resource", {})
+            .get("supplementary_data", {})
+            .get("related_ids", {})
+            .get("order_id")
+        )
+        if order_id:
+            db = get_db()
+            reg = db.execute(
+                "SELECT * FROM registrations WHERE paypal_order_id=?", (order_id,)
+            ).fetchone()
+            if reg is not None:
+                finalize_paid_registration(db, reg)
+
+    # Always 200 for anything we don't act on, too – PayPal retries on
+    # non-2xx responses, and event types we don't handle aren't errors.
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
