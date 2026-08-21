@@ -20,7 +20,6 @@
     <p class="hint">
       Regulärer Preis: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong> ·
       Preis mit gültigem Gutschein: <strong>{{ "%.2f"|format(price_internal) }} {{ currency }}</strong>
-      (in <code>.env</code> über <code>PRICE_STANDARD</code> / <code>PRICE_INTERNAL</code> einstellbar).
     </p>
 
     {% with messages = get_flashed_messages() %}
