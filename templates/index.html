@@ -43,16 +43,27 @@
         </label>
         <p id="voucher-feedback" class="hint"></p>
 
+        {% if payment_methods_enabled|length > 1 %}
         <label>Zahlungsart
           <span class="payment-choice">
+            {% if 'paypal' in payment_methods_enabled %}
             <label class="radio-inline">
               <input type="radio" name="payment_method" value="paypal" checked> PayPal (sofort bezahlen)
             </label>
+            {% endif %}
+            {% if 'sepa' in payment_methods_enabled %}
             <label class="radio-inline">
-              <input type="radio" name="payment_method" value="sepa"> Überweisung (Tisch 48h reserviert)
+              <input type="radio" name="payment_method" value="sepa"
+                     {{ 'checked' if 'paypal' not in payment_methods_enabled }}> Überweisung (Tisch 48h reserviert)
             </label>
+            {% endif %}
           </span>
         </label>
+        {% else %}
+        <input type="hidden" name="payment_method" value="{{ payment_methods_enabled[0] }}">
+        <p class="hint">Zahlungsart: {{ 'PayPal (sofort bezahlen)' if payment_methods_enabled[0] == 'paypal'
+          else 'Überweisung (Tisch 48h reserviert)' }}</p>
+        {% endif %}
 
         <p class="price-display">Zu zahlen: <strong id="live-price-label"></strong></p>
         <div class="row">
@@ -90,7 +101,7 @@
     </div>
   </div>
 
-  {% if paypal_client_id %}
+  {% if paypal_client_id and 'paypal' in payment_methods_enabled %}
   <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency={{ currency }}"></script>
   {% endif %}
   <script src="{{ url_for('static', filename='app.js') }}"></script>
