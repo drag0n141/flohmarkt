@@ -29,7 +29,7 @@ from werkzeug.utils import secure_filename
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Konfiguration – hier bzw. per .env anpassen
+# Configuration – adjust here or via .env
 # ---------------------------------------------------------------------------
 NUM_TABLES = int(os.environ.get("NUM_TABLES", 30))
 PRICE_STANDARD = float(os.environ.get("PRICE_STANDARD", os.environ.get("PRICE", 15.00)))
@@ -38,7 +38,7 @@ CURRENCY = os.environ.get("CURRENCY", "EUR")
 
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
-PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox")  # "sandbox" oder "live"
+PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox")  # "sandbox" or "live"
 
 PAYPAL_API_BASE = (
     "https://api-m.sandbox.paypal.com"
@@ -46,11 +46,11 @@ PAYPAL_API_BASE = (
     else "https://api-m.paypal.com"
 )
 
-HOLD_MINUTES = 10  # wie lange ein ausgewählter Tisch für die Bezahlung reserviert bleibt
+HOLD_MINUTES = 10  # how long a selected table stays reserved for payment
 DB_PATH = os.environ.get("DB_PATH", "flohmarkt.db")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
-SECRET_KEY = os.environ.get("SECRET_KEY", "bitte-in-.env-aendern")
+SECRET_KEY = os.environ.get("SECRET_KEY", "please-change-in-.env")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
@@ -60,19 +60,19 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# Hinter einem Reverse Proxy (Envoy Gateway o. ä.) – für korrekte Client-IPs
-# bei Rate-Limiting und Logging.
+# Behind a reverse proxy (Envoy Gateway or similar) – for correct client IPs
+# in rate limiting and logging.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    # Hinter HTTPS (Standardfall im Cluster) auf True lassen; für lokales
-    # Testen ohne HTTPS über SESSION_COOKIE_SECURE=false in .env abschaltbar.
+    # Keep True behind HTTPS (the default case in the cluster); for local
+    # testing without HTTPS, disable via SESSION_COOKIE_SECURE=false in .env.
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "true").lower() == "true",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
-    MAX_CONTENT_LENGTH=8 * 1024 * 1024,  # 8 MB – begrenzt u. a. Lageplan-Uploads
-    WTF_CSRF_TIME_LIMIT=None,  # Token soll nicht mitten in einer Admin-Session ablaufen
+    MAX_CONTENT_LENGTH=8 * 1024 * 1024,  # 8 MB – limits floor plan uploads, among other things
+    WTF_CSRF_TIME_LIMIT=None,  # token should not expire in the middle of an admin session
 )
 
 csrf = CSRFProtect(app)
@@ -96,7 +96,7 @@ def set_security_headers(response):
 
 
 # ---------------------------------------------------------------------------
-# Datenbank
+# Database
 # ---------------------------------------------------------------------------
 def get_db():
     if "db" not in g:
@@ -122,7 +122,7 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'free',  -- free, held, booked
             held_at TEXT,
             registration_id INTEGER,
-            pos_x REAL,  -- Position auf dem Lageplan in % (0-100), NULL = kein Lageplan-Marker
+            pos_x REAL,  -- position on the floor plan in % (0-100), NULL = no floor plan marker
             pos_y REAL
         )
         """
@@ -163,7 +163,7 @@ def init_db():
         )
         """
     )
-    # Migration für bereits existierende Datenbanken mit älterem Schema
+    # Migration for existing databases with an older schema
     table_cols = [r[1] for r in db.execute("PRAGMA table_info(tables)").fetchall()]
     if "pos_x" not in table_cols:
         db.execute("ALTER TABLE tables ADD COLUMN pos_x REAL")
@@ -203,8 +203,8 @@ def allowed_file(filename):
 
 
 def is_valid_image(file_bytes):
-    """Prüft anhand des tatsächlichen Dateiinhalts (nicht nur der Endung), ob es
-    sich um ein echtes, decodierbares Bild handelt."""
+    """Checks the actual file content (not just the extension) to verify it's
+    a genuine, decodable image."""
     try:
         img = Image.open(io.BytesIO(file_bytes))
         img.verify()
@@ -214,8 +214,8 @@ def is_valid_image(file_bytes):
 
 
 def reserve_voucher(db, code):
-    """Prüft einen Gutscheincode und reserviert eine Nutzung (atomar genug für diese Größenordnung).
-    Gibt (voucher_row, error_message) zurück – bei Erfolg ist error_message None."""
+    """Validates a voucher code and reserves one use (atomic enough for this scale).
+    Returns (voucher_row, error_message) – error_message is None on success."""
     code = (code or "").strip()
     if not code:
         return None, None
@@ -233,8 +233,8 @@ def reserve_voucher(db, code):
 
 
 def release_voucher(db, code):
-    """Gibt eine reservierte/eingelöste Nutzung eines Gutscheincodes wieder frei
-    (bei abgelaufener Reservierung oder Stornierung)."""
+    """Releases a reserved/redeemed use of a voucher code again
+    (on an expired reservation or a cancellation)."""
     if not code:
         return
     db.execute(
@@ -254,8 +254,8 @@ def login_required(view):
 
 
 def release_stale_holds(db):
-    """Gibt Tische und ggf. reservierte Gutscheincodes frei, deren Reservierung
-    abgelaufen ist, ohne dass bezahlt wurde."""
+    """Releases tables (and any reserved voucher codes) whose hold has expired
+    without payment having been completed."""
     cutoff = (datetime.utcnow() - timedelta(minutes=HOLD_MINUTES)).isoformat()
 
     expired = db.execute(
@@ -280,7 +280,7 @@ def release_stale_holds(db):
 
 
 # ---------------------------------------------------------------------------
-# PayPal Hilfsfunktionen (serverseitig, Orders API v2)
+# PayPal helper functions (server-side, Orders API v2)
 # ---------------------------------------------------------------------------
 def paypal_get_access_token():
     resp = requests.post(
@@ -326,7 +326,7 @@ def paypal_capture_order(order_id):
 
 
 # ---------------------------------------------------------------------------
-# Routen
+# Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
@@ -365,8 +365,8 @@ def api_floorplan_config():
 @app.route("/api/check-voucher")
 @limiter.limit("30 per minute")
 def api_check_voucher():
-    """Prüft einen Gutscheincode, OHNE ihn zu reservieren – für die Live-Anzeige
-    im Formular, bevor tatsächlich registriert wird."""
+    """Validates a voucher code WITHOUT reserving it – used for the live
+    display in the form, before the actual registration happens."""
     code = (request.args.get("code") or "").strip()
     if not code:
         return jsonify({"valid": False})
@@ -480,7 +480,7 @@ def api_capture_order():
 
 
 # ---------------------------------------------------------------------------
-# Admin-Bereich
+# Admin area
 # ---------------------------------------------------------------------------
 @app.route("/admin/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
