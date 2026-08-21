@@ -94,7 +94,7 @@ function updateLivePrice(voucherValid) {
   const cfg = APP_CONFIG;
   const amount = voucherValid ? cfg.priceInternal : cfg.priceStandard;
   document.getElementById("live-price-label").textContent =
-    formatPrice(amount) + (voucherValid ? " (Mitarbeiterpreis)" : "");
+    formatPrice(amount) + (voucherValid ? " (Mitgliederrabatt)" : "");
 }
 
 let voucherCheckTimer = null;
@@ -117,7 +117,7 @@ document.getElementById("voucher").addEventListener("input", (e) => {
     const res = await fetch("/api/check-voucher?code=" + encodeURIComponent(code));
     const data = await res.json();
     if (data.valid) {
-      feedback.textContent = "Gutschein gültig – Mitarbeiterpreis wird angewendet.";
+      feedback.textContent = "Gutschein gültig – Mitgliederrabatt wird angewendet.";
       feedback.className = "hint success";
       updateLivePrice(true);
     } else {
@@ -163,7 +163,7 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
   registrationId = data.registration_id;
   document.getElementById("pay-table-label").textContent = "Tisch " + data.table;
   document.getElementById("pay-price-label").textContent =
-    data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitarbeiterpreis)" : "");
+    data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
   stepForm.hidden = true;
   stepPay.hidden = false;
   renderPaypalButtons();
