@@ -107,6 +107,12 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .picker-btn {
   width: 36px; height: 36px; border-radius: 6px; border: 1px solid #ccc;
   background: #f4f5f7; color: #333; font-size: 13px; cursor: pointer;
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .picker-btn.placed { border-color: #2fa84f; }
 .picker-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
