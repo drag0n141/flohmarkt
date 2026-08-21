@@ -54,49 +54,51 @@
 
     <div class="card">
       <h2>Vorhandene Codes</h2>
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Genutzt</th>
-            <th>Status</th>
-            <th>Erstellt am</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for v in vouchers %}
-          <tr>
-            <td><code>{{ v.code }}</code></td>
-            <td>{{ v.used_count }} / {{ v.max_uses }}</td>
-            <td>
-              <span class="badge {{ 'paid' if v.active else 'cancelled' }}">
-                {{ 'aktiv' if v.active else 'deaktiviert' }}
-              </span>
-            </td>
-            <td>{{ v.created_at[:16].replace("T", " ") }}</td>
-            <td class="row-actions">
-              <form method="post">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="action" value="toggle">
-                <input type="hidden" name="voucher_id" value="{{ v.id }}">
-                <button type="submit" class="secondary small">
-                  {{ 'Deaktivieren' if v.active else 'Aktivieren' }}
-                </button>
-              </form>
-              <form method="post" onsubmit="return confirm('Code {{ v.code }} wirklich löschen?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="voucher_id" value="{{ v.id }}">
-                <button type="submit" class="secondary small">Löschen</button>
-              </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Genutzt</th>
+              <th>Status</th>
+              <th>Erstellt am</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in vouchers %}
+            <tr>
+              <td><code>{{ v.code }}</code></td>
+              <td>{{ v.used_count }} / {{ v.max_uses }}</td>
+              <td>
+                <span class="badge {{ 'paid' if v.active else 'cancelled' }}">
+                  {{ 'aktiv' if v.active else 'deaktiviert' }}
+                </span>
+              </td>
+              <td>{{ v.created_at[:16].replace("T", " ") }}</td>
+              <td class="row-actions">
+                <form method="post">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="toggle">
+                  <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                  <button type="submit" class="secondary small">
+                    {{ 'Deaktivieren' if v.active else 'Aktivieren' }}
+                  </button>
+                </form>
+                <form method="post" onsubmit="return confirm('Code {{ v.code }} wirklich löschen?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                  <button type="submit" class="secondary small">Löschen</button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </body>
