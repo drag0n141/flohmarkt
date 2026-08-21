@@ -49,7 +49,8 @@ form label {
   font-size: 14px;
   color: #333;
 }
-form input {
+form input,
+form textarea {
   display: block;
   width: 100%;
   padding: 10px;
@@ -57,7 +58,9 @@ form input {
   border: 1px solid #ccc;
   border-radius: 6px;
   font-size: 15px;
+  font-family: inherit;
 }
+form textarea { resize: vertical; }
 .row { display: flex; gap: 10px; margin-top: 8px; }
 button {
   background: #1f6feb;
@@ -70,6 +73,11 @@ button {
 }
 button.secondary { background: #e5e7eb; color: #333; }
 .error { color: #c94b4b; margin-top: 10px; min-height: 1em; }
+
+/* Zahlungsart-Auswahl (radio buttons nebeneinander statt volle Breite) */
+.payment-choice { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.radio-inline { display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 0; }
+.radio-inline input { width: auto; margin: 0; }
 
 /* --- Admin --- */
 .admin-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -168,7 +176,7 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .inline-form { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .inline-form label { margin-bottom: 0; }
 .inline-form input { width: auto; min-width: 160px; }
-.row-actions { display: flex; gap: 6px; }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
 
 .hint.success { color: #2fa84f; }
