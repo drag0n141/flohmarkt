@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – Lageplan</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>Lageplan verwalten</h1>
+      <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>1. Lageplan-Bild hochladen</h2>
+      <p class="hint">Ein Bild des Flohmarkt-Geländes (Skizze/Grundriss), auf dem anschließend
+        die Tische als Punkte platziert werden. Ein neuer Upload ersetzt das bisherige Bild.</p>
+      <form method="post" enctype="multipart/form-data">
+        <input type="file" name="floorplan" accept=".png,.jpg,.jpeg,.webp" required>
+        <button type="submit">Hochladen</button>
+      </form>
+    </div>
+
+    {% if image_url %}
+    <div class="card">
+      <h2>2. Tische auf dem Plan platzieren</h2>
+      <p class="hint">Tischnummer in der Liste auswählen, dann auf die passende Stelle im Bild
+        klicken. Bereits platzierte Tische erscheinen als nummerierte Punkte und können erneut
+        angeklickt werden, um sie zu verschieben.</p>
+
+      <div class="floorplan-editor">
+        <div class="table-picker">
+          {% for t in tables %}
+          <button type="button" class="picker-btn {{ 'placed' if t.pos_x is not none else '' }}"
+                  data-number="{{ t.number }}">
+            {{ t.number }}
+          </button>
+          {% endfor %}
+        </div>
+        <p id="picker-status" class="hint">Kein Tisch ausgewählt.</p>
+
+        <div id="plan-container" class="plan-container">
+          <img id="plan-image" src="{{ image_url }}" alt="Lageplan">
+          {% for t in tables %}
+            {% if t.pos_x is not none %}
+            <div class="plan-marker" data-number="{{ t.number }}"
+                 style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;">{{ t.number }}</div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">Noch kein Lageplan hochgeladen.</p>
+    {% endif %}
+  </div>
+
+  <script src="{{ url_for('static', filename='admin_floorplan.js') }}"></script>
+</body>
+</html>

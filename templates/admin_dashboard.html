@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – Tischübersicht</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>Tischübersicht</h1>
+      <nav>
+        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan verwalten</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="stats">
+      <span>Tische gesamt: <strong>{{ num_tables }}</strong></span>
+      <span>frei: <strong>{{ stats.get('free', 0) }}</strong></span>
+      <span>reserviert: <strong>{{ stats.get('held', 0) }}</strong></span>
+      <span>vergeben: <strong>{{ stats.get('booked', 0) }}</strong></span>
+    </div>
+
+    <div class="card">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Tisch</th>
+            <th>Name</th>
+            <th>E-Mail</th>
+            <th>Telefon</th>
+            <th>Preis</th>
+            <th>Gutschein</th>
+            <th>Status</th>
+            <th>Angemeldet am</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in registrations %}
+          <tr>
+            <td>{{ r.table_number }}</td>
+            <td>{{ r.name }}</td>
+            <td>{{ r.email }}</td>
+            <td>{{ r.phone or "–" }}</td>
+            <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
+            <td>{{ r.voucher_code or "–" }}</td>
+            <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+            <td>{{ r.created_at[:16].replace("T", " ") }}</td>
+            <td>
+              <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
+                    onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
+                <button type="submit" class="secondary small">Freigeben</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9">Noch keine Anmeldungen.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

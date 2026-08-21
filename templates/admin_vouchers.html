@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – Gutscheincodes</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>Gutscheincodes (Mitarbeiterpreis)</h1>
+      <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    <p class="hint">
+      Regulärer Preis: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong> ·
+      Preis mit gültigem Gutschein: <strong>{{ "%.2f"|format(price_internal) }} {{ currency }}</strong>
+      (in <code>.env</code> über <code>PRICE_STANDARD</code> / <code>PRICE_INTERNAL</code> einstellbar).
+    </p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Einzelnen Code anlegen</h2>
+      <p class="hint">Z. B. ein gemeinsamer Code für alle Mitarbeiter mit hoher Nutzungszahl.</p>
+      <form method="post" class="inline-form">
+        <input type="hidden" name="action" value="create">
+        <label>Code<input type="text" name="code" placeholder="z. B. MITARBEITER2026" required></label>
+        <label>Max. Nutzungen<input type="number" name="max_uses" value="1" min="1"></label>
+        <button type="submit">Anlegen</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Mehrere Einzel-Codes generieren</h2>
+      <p class="hint">Erzeugt zufällige, jeweils einmal einlösbare Codes – z. B. um jedem
+        Mitarbeiter einen eigenen Code zukommen zu lassen.</p>
+      <form method="post" class="inline-form">
+        <input type="hidden" name="action" value="bulk_generate">
+        <label>Anzahl<input type="number" name="count" value="10" min="1" max="200"></label>
+        <label>Präfix<input type="text" name="prefix" value="MA"></label>
+        <button type="submit">Generieren</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Vorhandene Codes</h2>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Genutzt</th>
+            <th>Status</th>
+            <th>Erstellt am</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in vouchers %}
+          <tr>
+            <td><code>{{ v.code }}</code></td>
+            <td>{{ v.used_count }} / {{ v.max_uses }}</td>
+            <td>
+              <span class="badge {{ 'paid' if v.active else 'cancelled' }}">
+                {{ 'aktiv' if v.active else 'deaktiviert' }}
+              </span>
+            </td>
+            <td>{{ v.created_at[:16].replace("T", " ") }}</td>
+            <td class="row-actions">
+              <form method="post">
+                <input type="hidden" name="action" value="toggle">
+                <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                <button type="submit" class="secondary small">
+                  {{ 'Deaktivieren' if v.active else 'Aktivieren' }}
+                </button>
+              </form>
+              <form method="post" onsubmit="return confirm('Code {{ v.code }} wirklich löschen?');">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="voucher_id" value="{{ v.id }}">
+                <button type="submit" class="secondary small">Löschen</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

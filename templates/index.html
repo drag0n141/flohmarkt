@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flohmarkt – Tischvergabe</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap">
+    <h1>Flohmarkt – Tischvergabe</h1>
+    <p class="subtitle">Standgebühr pro Tisch: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong>
+      <span class="hint">(ermäßigt mit gültigem Mitarbeiter-Gutscheincode:
+      {{ "%.2f"|format(price_internal) }} {{ currency }})</span></p>
+
+    <div id="step-select" class="card">
+      <h2>1. Tisch auswählen</h2>
+      <div class="legend">
+        <span><i class="dot free"></i> frei</span>
+        <span><i class="dot held"></i> reserviert</span>
+        <span><i class="dot booked"></i> vergeben</span>
+      </div>
+      <div id="floorplan-view" hidden>
+        <img id="floorplan-image" alt="Lageplan">
+      </div>
+      <div id="grid" class="grid"></div>
+    </div>
+
+    <div id="step-form" class="card" hidden>
+      <h2>2. Deine Daten</h2>
+      <p>Ausgewählter Tisch: <strong id="selected-table-label"></strong></p>
+      <form id="reg-form">
+        <label>Name*<input type="text" id="name" required></label>
+        <label>E-Mail*<input type="email" id="email" required></label>
+        <label>Telefon<input type="tel" id="phone"></label>
+        <label>Gutscheincode (optional, für Mitarbeiterpreis)
+          <input type="text" id="voucher" placeholder="z. B. MA-1A2B3C">
+        </label>
+        <p id="voucher-feedback" class="hint"></p>
+        <p class="price-display">Zu zahlen: <strong id="live-price-label"></strong></p>
+        <div class="row">
+          <button type="submit">Reservieren &amp; zur Zahlung</button>
+          <button type="button" id="back-btn" class="secondary">Zurück zur Tischauswahl</button>
+        </div>
+        <p id="form-error" class="error"></p>
+      </form>
+    </div>
+
+    <div id="step-pay" class="card" hidden>
+      <h2>3. Standgebühr bezahlen</h2>
+      <p>Tisch <strong id="pay-table-label"></strong> ist für dich reserviert (10 Minuten).
+         Zu zahlen: <strong id="pay-price-label"></strong>.
+         Bitte schließe die Zahlung ab, um den Tisch verbindlich zu buchen.</p>
+      <div id="paypal-button-container"></div>
+      <p id="pay-error" class="error"></p>
+    </div>
+
+    <div id="step-done" class="card" hidden>
+      <h2>Fertig! 🎉</h2>
+      <p>Deine Zahlung war erfolgreich. Tisch <strong id="done-table-label"></strong> ist für dich reserviert.
+         Eine Bestätigung wurde nicht automatisch per E-Mail versendet – das kannst du bei Bedarf ergänzen.</p>
+    </div>
+  </div>
+
+  {% if paypal_client_id %}
+  <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency={{ currency }}"></script>
+  {% endif %}
+  <script>
+    window.APP_CONFIG = {
+      hasPaypalClientId: {{ 'true' if paypal_client_id else 'false' }},
+      priceStandard: {{ price_standard }},
+      priceInternal: {{ price_internal }},
+      currency: "{{ currency }}"
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
