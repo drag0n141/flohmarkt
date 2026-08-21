@@ -1,7 +1,7 @@
 let selectedNumber = null;
 
 const statusEl = document.getElementById("picker-status");
-const planContainer = document.getElementById("plan-container");
+const planInner = document.getElementById("plan-inner");
 const planImage = document.getElementById("plan-image");
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
@@ -40,13 +40,13 @@ if (planImage) {
 }
 
 function upsertMarker(number, x, y) {
-  let marker = planContainer.querySelector('.plan-marker[data-number="' + number + '"]');
+  let marker = planInner.querySelector('.plan-marker[data-number="' + number + '"]');
   if (!marker) {
     marker = document.createElement("div");
     marker.className = "plan-marker";
     marker.dataset.number = number;
     marker.textContent = number;
-    planContainer.appendChild(marker);
+    planInner.appendChild(marker);
   }
   marker.style.left = x + "%";
   marker.style.top = y + "%";
