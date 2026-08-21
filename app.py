@@ -97,9 +97,16 @@ def set_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' https://www.paypal.com https://www.paypalobjects.com; "
-        "frame-src https://www.paypal.com; "
-        "connect-src 'self' https://www.paypal.com; "
+        # 'unsafe-inline' is required because the PayPal SDK injects its own
+        # inline bootstrap script that we have no control over (no nonce/hash
+        # we could pin without breaking on every PayPal SDK update).
+        "script-src 'self' https://www.paypal.com https://www.paypalobjects.com "
+        "https://www.sandbox.paypal.com 'unsafe-inline'; "
+        # PayPal's sandbox checkout is served from a different host than
+        # live (www.sandbox.paypal.com vs www.paypal.com); both need to be
+        # allowed since PAYPAL_MODE can be either.
+        "frame-src https://www.paypal.com https://www.sandbox.paypal.com; "
+        "connect-src 'self' https://www.paypal.com https://www.sandbox.paypal.com; "
         "img-src 'self' https://www.paypalobjects.com data:; "
         "style-src 'self' 'unsafe-inline'"
     )
