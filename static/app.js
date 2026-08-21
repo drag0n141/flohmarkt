@@ -140,7 +140,11 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
   const errorEl = document.getElementById("form-error");
   errorEl.textContent = "";
 
-  const paymentMethodInput = document.querySelector('input[name="payment_method"]:checked');
+  // Bei nur einer aktivierten Zahlungsart wird kein Radio-Button gerendert,
+  // sondern ein verstecktes Feld mit fixem Wert (das ":checked" nicht matcht).
+  const paymentMethodInput =
+    document.querySelector('input[name="payment_method"]:checked') ||
+    document.querySelector('input[name="payment_method"]');
   const paymentMethod = paymentMethodInput ? paymentMethodInput.value : "paypal";
 
   const payload = {
