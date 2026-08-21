@@ -64,6 +64,22 @@ SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
 
+# Which payment methods are offered, e.g. "paypal,sepa" or just "sepa".
+# Unknown entries are ignored; an empty/invalid result falls back to both.
+_VALID_PAYMENT_METHODS = ("paypal", "sepa")
+_payment_methods_raw = [
+    m.strip().lower()
+    for m in os.environ.get("PAYMENT_METHODS", "paypal,sepa").split(",")
+    if m.strip()
+]
+ENABLED_PAYMENT_METHODS = [m for m in _payment_methods_raw if m in _VALID_PAYMENT_METHODS]
+# De-duplicate while preserving order (in case of "paypal,paypal").
+ENABLED_PAYMENT_METHODS = list(dict.fromkeys(ENABLED_PAYMENT_METHODS))
+if not ENABLED_PAYMENT_METHODS:
+    print(f"[config] PAYMENT_METHODS={os.environ.get('PAYMENT_METHODS')!r} is empty/invalid – falling back to paypal,sepa.")
+    ENABLED_PAYMENT_METHODS = ["paypal", "sepa"]
+DEFAULT_PAYMENT_METHOD = ENABLED_PAYMENT_METHODS[0]
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
@@ -520,6 +536,7 @@ def index():
         price_internal=PRICE_INTERNAL,
         currency=CURRENCY,
         paypal_client_id=PAYPAL_CLIENT_ID,
+        payment_methods_enabled=ENABLED_PAYMENT_METHODS,
     )
 
 
@@ -575,7 +592,14 @@ def api_register():
     phone = (data.get("phone") or "").strip()
     table_number = data.get("table")
     voucher_input = (data.get("voucher") or "").strip()
-    payment_method = data.get("payment_method") if data.get("payment_method") in ("paypal", "sepa") else "paypal"
+
+    raw_payment_method = data.get("payment_method")
+    if not raw_payment_method:
+        payment_method = DEFAULT_PAYMENT_METHOD
+    elif raw_payment_method in ENABLED_PAYMENT_METHODS:
+        payment_method = raw_payment_method
+    else:
+        return jsonify({"error": "Diese Zahlungsart ist nicht verfügbar."}), 400
 
     if not name or not email or not table_number:
         return jsonify({"error": "Name, E-Mail und Tisch sind Pflichtfelder."}), 400
