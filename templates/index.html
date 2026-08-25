@@ -15,9 +15,6 @@
     {% if event_info %}
     <p class="event-info">{{ event_info }}</p>
     {% endif %}
-    <p class="subtitle">Standgebühr pro Tisch: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong>
-      <span class="hint">(ermäßigt mit gültigem Mitglieder-Gutscheincode:
-      {{ "%.2f"|format(price_internal) }} {{ currency }})</span></p>
 
     <div id="step-select" class="card">
       <h2>1. Tisch auswählen</h2>
