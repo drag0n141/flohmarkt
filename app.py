@@ -526,10 +526,20 @@ def finalize_paid_registration(db, reg):
 
 
 # ---------------------------------------------------------------------------
+# Editable public page content (title + free-text event info block)
+# ---------------------------------------------------------------------------
+DEFAULT_EVENT_TITLE = "Flohmarkt – Tischvergabe"
+DEFAULT_EVENT_INFO = ""
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
+    db = get_db()
+    event_title = get_setting(db, "event_title", DEFAULT_EVENT_TITLE)
+    event_info = get_setting(db, "event_info", DEFAULT_EVENT_INFO)
     return render_template(
         "index.html",
         price_standard=PRICE_STANDARD,
@@ -537,6 +547,8 @@ def index():
         currency=CURRENCY,
         paypal_client_id=PAYPAL_CLIENT_ID,
         payment_methods_enabled=ENABLED_PAYMENT_METHODS,
+        event_title=event_title,
+        event_info=event_info,
     )
 
 
@@ -950,6 +962,31 @@ def admin_emails():
         confirmation_body=confirmation_body,
         sepa_subject=sepa_subject,
         sepa_body=sepa_body,
+    )
+
+
+@app.route("/admin/page", methods=["GET", "POST"])
+@login_required
+def admin_page():
+    db = get_db()
+
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        info = (request.form.get("info") or "").strip()
+        if not title:
+            flash("Der Titel darf nicht leer sein.")
+        else:
+            set_setting(db, "event_title", title)
+            set_setting(db, "event_info", info)
+            flash("Seiteninhalt wurde gespeichert.")
+        return redirect(url_for("admin_page"))
+
+    event_title = get_setting(db, "event_title", DEFAULT_EVENT_TITLE)
+    event_info = get_setting(db, "event_info", DEFAULT_EVENT_INFO)
+    return render_template(
+        "admin_page.html",
+        event_title=event_title,
+        event_info=event_info,
     )
 
 
