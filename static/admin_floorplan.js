@@ -15,12 +15,10 @@ document.querySelectorAll(".picker-btn").forEach((btn) => {
   });
 });
 
-// Wie nah (in Prozentpunkten der Bildbreite/-höhe) ein Klick an einen bereits
-// platzierten Tisch heranreichen muss, damit der neue Tisch auf dessen
-// X- bzw. Y-Position "einrastet". X und Y werden unabhängig voneinander
-// geprüft, sodass sich Reihen und Spalten organisch aus den bereits
-// gesetzten Tischen ergeben, ohne vorher eine feste Rastergröße festlegen
-// zu müssen.
+// Wie nah (in Prozentpunkten der Bildhöhe) ein Klick an die Y-Position eines
+// bereits platzierten Tisches heranreichen muss, damit der neue Tisch auf
+// dessen Höhe "einrastet" (waagerechte Ausrichtung/Reihenbildung). Nur die
+// Y-Achse wird geprüft; die X-Position übernimmt immer exakt den Klickpunkt.
 const SNAP_THRESHOLD = 1.5;
 
 function getExistingPositions(excludeNumber) {
@@ -30,23 +28,17 @@ function getExistingPositions(excludeNumber) {
     if (num === excludeNumber) return;
     positions.push({
       number: num,
-      x: parseFloat(marker.style.left),
       y: parseFloat(marker.style.top),
     });
   });
   return positions;
 }
 
-function snapToExisting(rawX, rawY, excludeNumber) {
+function snapToExisting(rawY, excludeNumber) {
   const positions = getExistingPositions(excludeNumber);
-  let snappedX = null;
   let snappedY = null;
 
   positions.forEach((p) => {
-    const dx = Math.abs(p.x - rawX);
-    if (dx <= SNAP_THRESHOLD && (snappedX === null || dx < Math.abs(snappedX.x - rawX))) {
-      snappedX = p;
-    }
     const dy = Math.abs(p.y - rawY);
     if (dy <= SNAP_THRESHOLD && (snappedY === null || dy < Math.abs(snappedY.y - rawY))) {
       snappedY = p;
@@ -54,9 +46,7 @@ function snapToExisting(rawX, rawY, excludeNumber) {
   });
 
   return {
-    x: snappedX ? snappedX.x : rawX,
     y: snappedY ? snappedY.y : rawY,
-    snappedX: snappedX !== null,
     snappedY: snappedY !== null,
   };
 }
@@ -68,9 +58,9 @@ if (planImage) {
       return;
     }
     const rect = planImage.getBoundingClientRect();
-    const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
     const rawY = ((e.clientY - rect.top) / rect.height) * 100;
-    const { x, y, snappedX, snappedY } = snapToExisting(rawX, rawY, selectedNumber);
+    const { y, snappedY } = snapToExisting(rawY, selectedNumber);
 
     await fetch("/admin/api/set-position", {
       method: "POST",
@@ -83,10 +73,7 @@ if (planImage) {
       .querySelector('.picker-btn[data-number="' + selectedNumber + '"]')
       .classList.add("placed");
 
-    let snapNote = "";
-    if (snappedX && snappedY) snapNote = " (an bestehendem Tisch ausgerichtet)";
-    else if (snappedX) snapNote = " (senkrecht ausgerichtet)";
-    else if (snappedY) snapNote = " (waagerecht ausgerichtet)";
+    const snapNote = snappedY ? " (waagerecht ausgerichtet)" : "";
     statusEl.textContent = "Tisch " + selectedNumber + " platziert" + snapNote + ". Nächsten Tisch wählen oder fertig.";
   });
 }
