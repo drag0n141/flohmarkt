@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – Seiteninhalt</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>Seiteninhalt</h1>
+      <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
+        <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Titel &amp; Infotext der Startseite</h2>
+      <p class="hint">Erscheint ganz oben auf der öffentlichen Tischvergabe-Seite, direkt über der
+        Tischauswahl. Hier gehört rein, um welchen Flohmarkt es sich handelt, wann und wo er
+        stattfindet – der Infotext darf mehrere Zeilen haben und wird 1:1 (mit Zeilenumbrüchen)
+        angezeigt, bleibt aber leer, bis hier etwas eingetragen wird.</p>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Titel
+          <input type="text" name="title" value="{{ event_title }}" required>
+        </label>
+        <label>Infotext (optional)
+          <textarea name="info" rows="6" placeholder="z. B. Herbstflohmarkt des Kindergartens Sonnenschein
+Samstag, 12. September 2026, 10–14 Uhr
+Turnhalle, Musterstraße 1, 12345 Musterstadt">{{ event_info }}</textarea>
+        </label>
+        <button type="submit">Speichern</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
