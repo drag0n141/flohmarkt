@@ -11,7 +11,10 @@
       data-price-internal="{{ price_internal }}"
       data-currency="{{ currency }}">
   <div class="wrap">
-    <h1>Flohmarkt – Tischvergabe</h1>
+    <h1>{{ event_title }}</h1>
+    {% if event_info %}
+    <p class="event-info">{{ event_info }}</p>
+    {% endif %}
     <p class="subtitle">Standgebühr pro Tisch: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong>
       <span class="hint">(ermäßigt mit gültigem Mitglieder-Gutscheincode:
       {{ "%.2f"|format(price_internal) }} {{ currency }})</span></p>
