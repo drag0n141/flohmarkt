@@ -10,6 +10,13 @@ body {
 .wrap.narrow { max-width: 380px; }
 h1 { margin-bottom: 4px; }
 .subtitle { color: #555; margin-top: 0; }
+.event-info {
+  color: #444;
+  margin: 4px 0 16px;
+  /* Preserves the admin's line breaks (e.g. name / date / location on
+     separate lines) without needing to render this as HTML. */
+  white-space: pre-line;
+}
 
 .card {
   background: #fff;
