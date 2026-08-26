@@ -45,7 +45,8 @@
         den Text – sie sind nirgendwo sonst hinterlegt. Verfügbare Platzhalter:
         <code>{{ '{{name}}' }}</code>, <code>{{ '{{tisch}}' }}</code>, <code>{{ '{{preis}}' }}</code>,
         <code>{{ '{{referenz}}' }}</code> (Verwendungszweck), <code>{{ '{{frist}}' }}</code>
-        (Zahlungsfrist, 48 Stunden ab Reservierung).</p>
+        (Zahlungsfrist, aktuell {{ sepa_hold_hours }} Stunden ab Reservierung – einstellbar über
+        <code>SEPA_HOLD_HOURS</code>).</p>
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="kind" value="sepa">
