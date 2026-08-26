@@ -547,6 +547,7 @@ def index():
         currency=CURRENCY,
         paypal_client_id=PAYPAL_CLIENT_ID,
         payment_methods_enabled=ENABLED_PAYMENT_METHODS,
+        sepa_hold_hours=SEPA_HOLD_HOURS,
         event_title=event_title,
         event_info=event_info,
     )
@@ -962,6 +963,7 @@ def admin_emails():
         confirmation_body=confirmation_body,
         sepa_subject=sepa_subject,
         sepa_body=sepa_body,
+        sepa_hold_hours=SEPA_HOLD_HOURS,
     )
 
 
