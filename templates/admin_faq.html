@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – FAQ</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>FAQ</h1>
+      <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
+        <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
+        <a href="{{ url_for('admin_page') }}">Seiteninhalt</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    <p class="hint">Erscheint als ausklappbarer Bereich oberhalb der Tischauswahl auf der
+      öffentlichen Seite. Die Reihenfolge hier entspricht der Anzeige-Reihenfolge.</p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Neue Frage hinzufügen</h2>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="add">
+        <label>Frage<input type="text" name="question" required></label>
+        <label>Antwort<textarea name="answer" rows="3" required></textarea></label>
+        <button type="submit">Hinzufügen</button>
+      </form>
+    </div>
+
+    {% for item in faq_items %}
+    <div class="card">
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="faq_id" value="{{ item.id }}">
+        <label>Frage<input type="text" name="question" value="{{ item.question }}" required></label>
+        <label>Antwort<textarea name="answer" rows="3" required>{{ item.answer }}</textarea></label>
+        <div class="row">
+          <button type="submit">Speichern</button>
+        </div>
+      </form>
+      <form method="post" onsubmit="return confirm('Frage wirklich löschen?');" class="row" style="margin-top: 8px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="faq_id" value="{{ item.id }}">
+        <button type="submit" class="secondary small">Löschen</button>
+      </form>
+    </div>
+    {% else %}
+    <p class="hint">Noch keine Fragen angelegt.</p>
+    {% endfor %}
+  </div>
+</body>
+</html>
