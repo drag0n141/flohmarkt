@@ -18,6 +18,18 @@ h1 { margin-bottom: 4px; }
   white-space: pre-line;
 }
 
+/* FAQ: <details>/<summary> gives a native, JS-free collapsible section. */
+.faq-block summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 18px;
+  outline: none;
+}
+.faq-block[open] summary { margin-bottom: 12px; }
+.faq-list dt { font-weight: 600; margin-top: 14px; }
+.faq-list dt:first-child { margin-top: 0; }
+.faq-list dd { margin: 4px 0 0; color: #444; white-space: pre-line; }
+
 .card {
   background: #fff;
   border-radius: 12px;
