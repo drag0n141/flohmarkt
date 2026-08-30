@@ -16,6 +16,18 @@
     <p class="event-info">{{ event_info }}</p>
     {% endif %}
 
+    {% if faq_items %}
+    <details class="card faq-block">
+      <summary>Häufige Fragen (FAQ)</summary>
+      <dl class="faq-list">
+        {% for item in faq_items %}
+        <dt>{{ item.question }}</dt>
+        <dd>{{ item.answer }}</dd>
+        {% endfor %}
+      </dl>
+    </details>
+    {% endif %}
+
     <div id="step-select" class="card">
       <h2>1. Tisch auswählen</h2>
       <div class="legend">
