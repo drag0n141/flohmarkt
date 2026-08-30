@@ -199,6 +199,16 @@ def init_db():
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS faq (
+            id INTEGER PRIMARY KEY,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     # Migration for existing databases with an older schema
     table_cols = [r[1] for r in db.execute("PRAGMA table_info(tables)").fetchall()]
     if "pos_x" not in table_cols:
@@ -221,6 +231,24 @@ def init_db():
     if existing_max < NUM_TABLES:
         for i in range(existing_max + 1, NUM_TABLES + 1):
             db.execute("INSERT INTO tables (number, status) VALUES (?, 'free')", (i,))
+
+    # Seed a few placeholder FAQ entries on first run so the admin has
+    # something concrete to edit/replace rather than an empty list; never
+    # re-seeds once the admin has added or removed anything.
+    faq_count = db.execute("SELECT COUNT(*) FROM faq").fetchone()[0]
+    if faq_count == 0:
+        placeholder_faq = [
+            ("Muss ich meinen Tisch selbst aufbauen?", "<Bitte hier die Antwort eintragen>"),
+            ("Was passiert, wenn ich nicht rechtzeitig bezahle?", "<Bitte hier die Antwort eintragen>"),
+            ("Kann ich meine Reservierung stornieren?", "<Bitte hier die Antwort eintragen>"),
+        ]
+        now_iso = datetime.utcnow().isoformat()
+        for question, answer in placeholder_faq:
+            db.execute(
+                "INSERT INTO faq (question, answer, created_at) VALUES (?, ?, ?)",
+                (question, answer, now_iso),
+            )
+
     db.commit()
     db.close()
 
@@ -540,6 +568,7 @@ def index():
     db = get_db()
     event_title = get_setting(db, "event_title", DEFAULT_EVENT_TITLE)
     event_info = get_setting(db, "event_info", DEFAULT_EVENT_INFO)
+    faq_items = db.execute("SELECT id, question, answer FROM faq ORDER BY id").fetchall()
     return render_template(
         "index.html",
         price_standard=PRICE_STANDARD,
@@ -550,6 +579,7 @@ def index():
         sepa_hold_hours=SEPA_HOLD_HOURS,
         event_title=event_title,
         event_info=event_info,
+        faq_items=faq_items,
     )
 
 
@@ -990,6 +1020,53 @@ def admin_page():
         event_title=event_title,
         event_info=event_info,
     )
+
+
+@app.route("/admin/faq", methods=["GET", "POST"])
+@login_required
+def admin_faq():
+    db = get_db()
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "add":
+            question = (request.form.get("question") or "").strip()
+            answer = (request.form.get("answer") or "").strip()
+            if not question or not answer:
+                flash("Frage und Antwort dürfen nicht leer sein.")
+            else:
+                db.execute(
+                    "INSERT INTO faq (question, answer, created_at) VALUES (?, ?, ?)",
+                    (question, answer, datetime.utcnow().isoformat()),
+                )
+                db.commit()
+                flash("Frage wurde hinzugefügt.")
+
+        elif action == "update":
+            faq_id = request.form.get("faq_id")
+            question = (request.form.get("question") or "").strip()
+            answer = (request.form.get("answer") or "").strip()
+            if not question or not answer:
+                flash("Frage und Antwort dürfen nicht leer sein.")
+            else:
+                db.execute(
+                    "UPDATE faq SET question=?, answer=? WHERE id=?",
+                    (question, answer, faq_id),
+                )
+                db.commit()
+                flash("Frage wurde aktualisiert.")
+
+        elif action == "delete":
+            faq_id = request.form.get("faq_id")
+            db.execute("DELETE FROM faq WHERE id=?", (faq_id,))
+            db.commit()
+            flash("Frage wurde gelöscht.")
+
+        return redirect(url_for("admin_faq"))
+
+    faq_items = db.execute("SELECT id, question, answer FROM faq ORDER BY id").fetchall()
+    return render_template("admin_faq.html", faq_items=faq_items)
 
 
 @app.route("/admin/floorplan", methods=["GET", "POST"])
