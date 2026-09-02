@@ -48,6 +48,10 @@
     {% endif %}
 
     <div class="card">
+      <div class="tabs">
+        <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if view == 'active' else '' }}">Aktiv</a>
+        <a href="{{ url_for('admin_dashboard', view='history') }}" class="{{ 'active' if view == 'history' else '' }}">Verlauf (abgelaufen/storniert)</a>
+      </div>
       <div class="table-scroll">
         <table class="admin-table">
           <thead>
@@ -84,15 +88,17 @@
                   <button type="submit" class="secondary small">Zahlung bestätigen</button>
                 </form>
                 {% endif %}
+                {% if r.status != 'cancelled' %}
                 <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
                       onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button type="submit" class="secondary small">Freigeben</button>
                 </form>
+                {% endif %}
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="10">Noch keine Anmeldungen.</td></tr>
+            <tr><td colspan="10">{{ 'Noch keine abgelaufenen/stornierten Anmeldungen.' if view == 'history' else 'Noch keine Anmeldungen.' }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
