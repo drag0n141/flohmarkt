@@ -4,6 +4,8 @@ import os
 import secrets
 import smtplib
 import sqlite3
+import threading
+import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from functools import wraps
@@ -223,6 +225,8 @@ def init_db():
         db.execute("ALTER TABLE registrations ADD COLUMN voucher_code TEXT")
     if "payment_method" not in reg_cols:
         db.execute("ALTER TABLE registrations ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'paypal'")
+    if "reminder_sent" not in reg_cols:
+        db.execute("ALTER TABLE registrations ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0")
 
     # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
     # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
@@ -465,9 +469,24 @@ Geht die Zahlung nicht rechtzeitig bei uns ein, wird die Reservierung automatisc
 
 Bis zum Flohmarkt!"""
 
+DEFAULT_REMINDER_SUBJECT = "Erinnerung: Zahlung für Tisch {{tisch}} noch offen"
+DEFAULT_REMINDER_BODY = """Hallo {{name}},
+
+deine Reservierung für Tisch {{tisch}} läuft bald ab – bitte überweise den Betrag zeitnah,
+damit der Tisch nicht automatisch wieder freigegeben wird.
+
+Zu zahlender Betrag: {{preis}}
+Verwendungszweck: {{referenz}}
+Zahlungsfrist: {{frist}}
+
+Falls du bereits überwiesen hast, kannst du diese Nachricht ignorieren.
+
+Bis zum Flohmarkt!"""
+
 EMAIL_TEMPLATE_DEFAULTS = {
     "confirmation": (DEFAULT_CONFIRMATION_SUBJECT, DEFAULT_CONFIRMATION_BODY),
     "sepa": (DEFAULT_SEPA_SUBJECT, DEFAULT_SEPA_BODY),
+    "reminder": (DEFAULT_REMINDER_SUBJECT, DEFAULT_REMINDER_BODY),
 }
 
 
@@ -551,6 +570,86 @@ def finalize_paid_registration(db, reg):
         preis=f"{reg['price']:.2f} {CURRENCY}",
         gutschein=reg["voucher_code"] or "",
     )
+
+
+def send_sepa_reminders(db):
+    """Sends a one-time reminder email to pending bank-transfer registrations
+    that are within 24h of their hold expiring, then marks them so they're
+    never reminded twice. Only makes sense when the hold is longer than 24h
+    in the first place – with a shorter SEPA_HOLD_HOURS there's no meaningful
+    "24h before" moment, so this is a no-op in that case.
+
+    Safe to call concurrently (e.g. from multiple gunicorn worker processes
+    each running their own background thread): the UPDATE ... WHERE
+    reminder_sent=0 acts as a compare-and-swap, so only the caller that
+    actually flips the flag from 0 to 1 goes on to send the email; a second,
+    near-simultaneous caller sees rowcount=0 and skips it.
+    """
+    if SEPA_HOLD_HOURS <= 24:
+        return
+
+    now = datetime.utcnow()
+    reminder_cutoff = (now - timedelta(hours=SEPA_HOLD_HOURS - 24)).isoformat()
+
+    candidates = db.execute(
+        """
+        SELECT id, table_id, name, email, price, created_at
+        FROM registrations
+        WHERE status='pending' AND payment_method='sepa'
+          AND reminder_sent=0 AND created_at < ?
+        """,
+        (reminder_cutoff,),
+    ).fetchall()
+
+    for reg in candidates:
+        cur = db.execute(
+            "UPDATE registrations SET reminder_sent=1 WHERE id=? AND reminder_sent=0",
+            (reg["id"],),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            continue  # another worker/thread already claimed this one
+
+        table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+        table_number = table_row["number"] if table_row else "?"
+        created_at = datetime.fromisoformat(reg["created_at"])
+        deadline_str = (created_at + timedelta(hours=SEPA_HOLD_HOURS)).strftime("%d.%m.%Y um %H:%M Uhr")
+        send_templated_email(
+            db,
+            "reminder",
+            reg["email"],
+            name=reg["name"],
+            tisch=table_number,
+            preis=f"{reg['price']:.2f} {CURRENCY}",
+            referenz=f"FLOHMARKT-{table_number}",
+            frist=deadline_str,
+        )
+
+
+def _sepa_reminder_loop():
+    """Background loop, started once per worker process at import time (see
+    below), that periodically checks for and sends SEPA reminder emails —
+    independent of whether anyone is actually visiting the site, unlike
+    release_stale_holds() which only runs opportunistically on page/API
+    hits. Runs entirely inside the container; no external scheduler needed."""
+    interval_seconds = 15 * 60
+    while True:
+        time.sleep(interval_seconds)
+        try:
+            with app.app_context():
+                send_sepa_reminders(get_db())
+        except Exception as e:
+            print(f"[reminder] Error while checking SEPA reminders: {e}")
+
+
+# Only start the background thread if SMTP is actually configured (no point
+# looping otherwise, since no email could be sent anyway) — this also means
+# importing this module for local testing without SMTP set (the common case)
+# never spins up background threads sending real emails. Each gunicorn
+# worker process starts its own thread; harmless thanks to the
+# compare-and-swap in send_sepa_reminders() above.
+if SMTP_HOST and os.environ.get("DISABLE_BACKGROUND_TASKS", "false").lower() != "true":
+    threading.Thread(target=_sepa_reminder_loop, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -820,13 +919,18 @@ def admin_logout():
 def admin_dashboard():
     db = get_db()
     release_stale_holds(db)
+
+    view = request.args.get("view")
+    view = "history" if view == "history" else "active"
+    status_filter = "r.status = 'cancelled'" if view == "history" else "r.status != 'cancelled'"
+
     rows = db.execute(
-        """
+        f"""
         SELECT r.id, r.name, r.email, r.phone, r.status, r.created_at, r.price, r.voucher_code,
                r.payment_method, t.number AS table_number
         FROM registrations r
         JOIN tables t ON t.id = r.table_id
-        WHERE r.status != 'cancelled'
+        WHERE {status_filter}
         ORDER BY t.number
         """
     ).fetchall()
@@ -853,6 +957,7 @@ def admin_dashboard():
         currency=CURRENCY,
         floorplan_image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         plan_tables=plan_tables,
+        view=view,
     )
 
 
@@ -861,15 +966,23 @@ def admin_dashboard():
 def admin_cancel(registration_id):
     db = get_db()
     reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
-    if reg is not None:
+    if reg is not None and reg["status"] != "cancelled":
         release_voucher(db, reg["voucher_code"])
         db.execute("UPDATE registrations SET status='cancelled' WHERE id=?", (registration_id,))
+        # The AND registration_id=? guard matters now that cancelled entries
+        # stay visible (in the history tab): without it, a stale "Freigeben"
+        # click on an old entry could free a table that has since been
+        # rebooked by someone else, since it would otherwise match purely on
+        # table_id regardless of who currently holds it.
         db.execute(
-            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL WHERE id=?",
-            (reg["table_id"],),
+            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL "
+            "WHERE id=? AND registration_id=?",
+            (reg["table_id"], registration_id),
         )
         db.commit()
         flash("Tisch wurde freigegeben.")
+    elif reg is not None:
+        flash("Diese Registrierung ist bereits storniert.")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -974,7 +1087,7 @@ def admin_emails():
 
     if request.method == "POST":
         kind = request.form.get("kind")
-        if kind in ("confirmation", "sepa"):
+        if kind in ("confirmation", "sepa", "reminder"):
             subject = (request.form.get("subject") or "").strip()
             body = (request.form.get("body") or "").strip()
             if subject and body:
@@ -987,12 +1100,15 @@ def admin_emails():
 
     confirmation_subject, confirmation_body = get_email_template(db, "confirmation")
     sepa_subject, sepa_body = get_email_template(db, "sepa")
+    reminder_subject, reminder_body = get_email_template(db, "reminder")
     return render_template(
         "admin_emails.html",
         confirmation_subject=confirmation_subject,
         confirmation_body=confirmation_body,
         sepa_subject=sepa_subject,
         sepa_body=sepa_body,
+        reminder_subject=reminder_subject,
+        reminder_body=reminder_body,
         sepa_hold_hours=SEPA_HOLD_HOURS,
     )
 
