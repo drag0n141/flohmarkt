@@ -1,6 +1,26 @@
 let selectedTable = null;
 let registrationId = null;
-let floorplanConfig = null; // { image_url, tables: [{number, x, y}] } oder null
+let floorplanConfig = null; // { image_url, tables: [{number, x, y}] } or null
+
+let pendingOrderId = null;
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+async function apiFetch(url, payload) {
+  const options = payload === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+    body: JSON.stringify(payload),
+  };
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || "Die Anfrage ist fehlgeschlagen. Bitte versuche es erneut.");
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
 
 const APP_CONFIG = {
   hasPaypalClientId: document.body.dataset.hasPaypal === "true",
@@ -21,14 +41,12 @@ const stepDone = document.getElementById("step-done");
 
 async function loadFloorplanConfig() {
   if (floorplanConfig !== null) return floorplanConfig;
-  const res = await fetch("/api/floorplan-config");
-  floorplanConfig = await res.json();
+  floorplanConfig = await apiFetch("/api/floorplan-config");
   return floorplanConfig;
 }
 
 async function loadTables() {
-  const [tablesRes, config] = await Promise.all([fetch("/api/tables"), loadFloorplanConfig()]);
-  const tables = await tablesRes.json();
+  const [tables, config] = await Promise.all([apiFetch("/api/tables"), loadFloorplanConfig()]);
   const statusByNumber = {};
   tables.forEach((t) => (statusByNumber[t.number] = t.status));
 
@@ -115,14 +133,20 @@ document.getElementById("voucher").addEventListener("input", (e) => {
   feedback.className = "hint";
 
   voucherCheckTimer = setTimeout(async () => {
-    const res = await fetch("/api/check-voucher?code=" + encodeURIComponent(code));
-    const data = await res.json();
-    if (data.valid) {
-      feedback.textContent = "Gutschein gültig – Mitgliederrabatt wird angewendet.";
-      feedback.className = "hint success";
-      updateLivePrice(true);
-    } else {
-      feedback.textContent = "Dieser Gutscheincode ist ungültig oder bereits aufgebraucht.";
+    try {
+      const data = await apiFetch("/api/check-voucher?code=" + encodeURIComponent(code));
+      if (document.getElementById("voucher").value.trim() !== code) return;
+      if (data.valid) {
+        feedback.textContent = "Gutschein gültig – Mitgliederrabatt wird angewendet.";
+        feedback.className = "hint success";
+        updateLivePrice(true);
+      } else {
+        feedback.textContent = "Dieser Gutscheincode ist ungültig oder bereits aufgebraucht.";
+        feedback.className = "hint error-text";
+        updateLivePrice(false);
+      }
+    } catch (error) {
+      feedback.textContent = error.message;
       feedback.className = "hint error-text";
       updateLivePrice(false);
     }
@@ -132,7 +156,7 @@ document.getElementById("voucher").addEventListener("input", (e) => {
 document.getElementById("back-btn").addEventListener("click", () => {
   stepForm.hidden = true;
   stepSelect.hidden = false;
-  loadTables();
+  refreshTables();
 });
 
 document.getElementById("reg-form").addEventListener("submit", async (e) => {
@@ -140,8 +164,7 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
   const errorEl = document.getElementById("form-error");
   errorEl.textContent = "";
 
-  // Bei nur einer aktivierten Zahlungsart wird kein Radio-Button gerendert,
-  // sondern ein verstecktes Feld mit fixem Wert (das ":checked" nicht matcht).
+  // A single enabled payment method is rendered as a hidden input.
   const paymentMethodInput =
     document.querySelector('input[name="payment_method"]:checked') ||
     document.querySelector('input[name="payment_method"]');
@@ -156,35 +179,33 @@ document.getElementById("reg-form").addEventListener("submit", async (e) => {
     payment_method: paymentMethod,
   };
 
-  const res = await fetch("/api/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
+  const submitButton = e.target.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const data = await apiFetch("/api/register", payload);
 
-  if (!res.ok) {
-    errorEl.textContent = data.error || "Ein Fehler ist aufgetreten.";
-    if (res.status === 409) loadTables(); // Tisch war schon weg -> Grid aktualisieren
-    return;
-  }
+    registrationId = data.registration_id;
+    stepForm.hidden = true;
 
-  registrationId = data.registration_id;
-  stepForm.hidden = true;
-
-  if (data.payment_method === "sepa") {
-    document.getElementById("sepa-table-label").textContent = "Tisch " + data.table;
-    document.getElementById("sepa-price-label").textContent =
-      data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
-    document.getElementById("sepa-reference-label").textContent = data.reference;
-    document.getElementById("sepa-deadline-label").textContent = data.deadline;
-    stepSepaPending.hidden = false;
-  } else {
-    document.getElementById("pay-table-label").textContent = "Tisch " + data.table;
-    document.getElementById("pay-price-label").textContent =
-      data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
-    stepPay.hidden = false;
-    renderPaypalButtons();
+    if (data.payment_method === "sepa") {
+      document.getElementById("sepa-table-label").textContent = "Tisch " + data.table;
+      document.getElementById("sepa-price-label").textContent =
+        data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
+      document.getElementById("sepa-reference-label").textContent = data.reference;
+      document.getElementById("sepa-deadline-label").textContent = data.deadline;
+      stepSepaPending.hidden = false;
+    } else {
+      document.getElementById("pay-table-label").textContent = "Tisch " + data.table;
+      document.getElementById("pay-price-label").textContent =
+        data.price.toFixed(2).replace(".", ",") + " €" + (data.voucher_applied ? " (Mitgliederrabatt)" : "");
+      stepPay.hidden = false;
+      renderPaypalButtons();
+    }
+  } catch (error) {
+    errorEl.textContent = error.message;
+    if (error.status === 409) refreshTables();
+  } finally {
+    submitButton.disabled = false;
   }
 });
 
@@ -201,37 +222,55 @@ function renderPaypalButtons() {
 
   paypal.Buttons({
     createOrder: async () => {
-      const res = await fetch("/api/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ registration_id: registrationId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Bestellung fehlgeschlagen");
+      const data = await apiFetch("/api/create-order", { registration_id: registrationId });
       return data.order_id;
     },
     onApprove: async (data) => {
-      const res = await fetch("/api/capture-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: data.orderID }),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        payError.textContent = result.error || "Zahlung konnte nicht abgeschlossen werden.";
-        return;
-      }
-      document.getElementById("done-table-label").textContent = document.getElementById(
-        "pay-table-label"
-      ).textContent;
-      stepPay.hidden = true;
-      stepDone.hidden = false;
+      pendingOrderId = data.orderID;
+      await capturePayment();
     },
     onError: (err) => {
       console.error(err);
-      payError.textContent = "Es gab ein Problem bei der Zahlung. Bitte erneut versuchen.";
+      payError.textContent = err.message || "Es gab ein Problem bei der Zahlung. Bitte erneut versuchen.";
     },
   }).render("#paypal-button-container");
 }
 
-loadTables();
+async function capturePayment() {
+  const retry = document.getElementById("retry-payment");
+  const errorEl = document.getElementById("pay-error");
+  retry.hidden = true;
+  retry.disabled = true;
+  errorEl.textContent = "";
+  try {
+    await apiFetch("/api/capture-order", { order_id: pendingOrderId });
+    document.getElementById("done-table-label").textContent = document.getElementById("pay-table-label").textContent;
+    stepPay.hidden = true;
+    stepDone.hidden = false;
+  } catch (error) {
+    if (["payment_received_unallocated", "payment_review"].includes(error.data?.status)) {
+      stepPay.hidden = true;
+      document.getElementById("payment-review-message").textContent = error.message;
+      document.getElementById("step-payment-review").hidden = false;
+    } else {
+      errorEl.textContent = error.message;
+      retry.hidden = false;
+    }
+  } finally {
+    retry.disabled = false;
+  }
+}
+
+document.getElementById("retry-payment").addEventListener("click", capturePayment);
+
+async function refreshTables() {
+  const errorEl = document.getElementById("tables-error");
+  try {
+    await loadTables();
+    errorEl.textContent = "";
+  } catch (error) {
+    errorEl.textContent = error.message;
+  }
+}
+
+refreshTables();

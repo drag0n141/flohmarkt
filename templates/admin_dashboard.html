@@ -31,6 +31,9 @@
       <span>vergeben: <strong>{{ stats.get('booked', 0) }}</strong></span>
     </div>
 
+    <p class="hint">E-Mails ausstehend: {{ pending_emails }}; davon mit Versandfehler: {{ failed_emails }}.
+      Fehlgeschlagene Zustellungen werden automatisch erneut versucht.</p>
+
     {% if floorplan_image_url %}
     <div class="card">
       <h2>Lageplan</h2>
@@ -61,7 +64,7 @@
               <th>E-Mail</th>
               <th>Telefon</th>
               <th>Preis</th>
-              <th>Zahlungsart</th>
+              <th>Zahlungsart / Referenz</th>
               <th>Gutschein</th>
               <th>Status</th>
               <th>Angemeldet am</th>
@@ -76,16 +79,27 @@
               <td>{{ r.email }}</td>
               <td>{{ r.phone or "–" }}</td>
               <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
-              <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</td>
+              <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}
+                {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
               <td>{{ r.voucher_code or "–" }}</td>
-              <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+              <td><span class="badge {{ r.status }}">{{ r.status }}</span>
+                {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
+                {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
+              </td>
               <td>{{ r.created_at[:16].replace("T", " ") }}</td>
               <td class="row-actions">
-                {% if r.payment_method == 'sepa' and r.status == 'pending' %}
+                {% if r.payment_method == 'sepa' and r.status != 'paid' and not r.payment_received_at %}
                 <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
                       onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="secondary small">Zahlung bestätigen</button>
+                  <button type="submit" class="secondary small">Zahlungseingang erfassen</button>
+                </form>
+                {% endif %}
+                {% if r.payment_review %}
+                <form method="post" action="{{ url_for('admin_resolve_payment', registration_id=r.id) }}"
+                      onsubmit="return confirm('Ist die Zahlung außerhalb der Anwendung geklärt? Hier wird keine Erstattung ausgelöst.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="secondary small">Klärung erledigt</button>
                 </form>
                 {% endif %}
                 {% if r.status != 'cancelled' %}
