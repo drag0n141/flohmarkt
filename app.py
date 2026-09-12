@@ -1,12 +1,18 @@
 import hmac
 import io
 import os
+import re
+import ssl
+import uuid
+from contextlib import contextmanager
+from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 import secrets
 import smtplib
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from functools import wraps
 
@@ -29,6 +35,7 @@ from flask_wtf import CSRFProtect
 from PIL import Image, UnidentifiedImageError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import BadRequest, HTTPException, UnsupportedMediaType
 
 load_dotenv()
 
@@ -45,9 +52,7 @@ PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
 PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox")  # "sandbox" or "live"
 
 PAYPAL_API_BASE = (
-    "https://api-m.sandbox.paypal.com"
-    if PAYPAL_MODE == "sandbox"
-    else "https://api-m.paypal.com"
+    "https://api-m.sandbox.paypal.com" if PAYPAL_MODE == "sandbox" else "https://api-m.paypal.com"
 )
 
 HOLD_MINUTES = 10  # how long a PayPal table hold stays reserved for payment
@@ -55,7 +60,9 @@ SEPA_HOLD_HOURS = int(os.environ.get("SEPA_HOLD_HOURS", 48))  # same, for bank t
 DB_PATH = os.environ.get("DB_PATH", "flohmarkt.db")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
-SECRET_KEY = os.environ.get("SECRET_KEY", "please-change-in-.env")
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if len(SECRET_KEY) < 32 or SECRET_KEY in {"please-change-in-.env", "a-random-long-string"}:
+    raise RuntimeError("SECRET_KEY must be a private random value of at least 32 characters.")
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
@@ -78,7 +85,9 @@ ENABLED_PAYMENT_METHODS = [m for m in _payment_methods_raw if m in _VALID_PAYMEN
 # De-duplicate while preserving order (in case of "paypal,paypal").
 ENABLED_PAYMENT_METHODS = list(dict.fromkeys(ENABLED_PAYMENT_METHODS))
 if not ENABLED_PAYMENT_METHODS:
-    print(f"[config] PAYMENT_METHODS={os.environ.get('PAYMENT_METHODS')!r} is empty/invalid – falling back to paypal,sepa.")
+    print(
+        f"[config] PAYMENT_METHODS={os.environ.get('PAYMENT_METHODS')!r} is empty/invalid – falling back to paypal,sepa."
+    )
     ENABLED_PAYMENT_METHODS = ["paypal", "sepa"]
 DEFAULT_PAYMENT_METHOD = ENABLED_PAYMENT_METHODS[0]
 
@@ -132,12 +141,17 @@ def set_security_headers(response):
     return response
 
 
+def utcnow():
+    """Return naive UTC for compatibility with existing SQLite timestamps."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = sqlite3.connect(DB_PATH, timeout=15)
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -150,9 +164,9 @@ def close_db(exception=None):
 
 
 def init_db():
-    db = sqlite3.connect(DB_PATH)
-    db.execute(
-        """
+    db = sqlite3.connect(DB_PATH, timeout=30)
+    db.execute("BEGIN IMMEDIATE")
+    db.execute("""
         CREATE TABLE IF NOT EXISTS tables (
             id INTEGER PRIMARY KEY,
             number INTEGER UNIQUE NOT NULL,
@@ -162,10 +176,8 @@ def init_db():
             pos_x REAL,  -- position on the floor plan in % (0-100), NULL = no floor plan marker
             pos_y REAL
         )
-        """
-    )
-    db.execute(
-        """
+        """)
+    db.execute("""
         CREATE TABLE IF NOT EXISTS registrations (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
@@ -179,10 +191,8 @@ def init_db():
             voucher_code TEXT,
             payment_method TEXT NOT NULL DEFAULT 'paypal'  -- paypal, sepa
         )
-        """
-    )
-    db.execute(
-        """
+        """)
+    db.execute("""
         CREATE TABLE IF NOT EXISTS vouchers (
             id INTEGER PRIMARY KEY,
             code TEXT UNIQUE NOT NULL,
@@ -191,26 +201,21 @@ def init_db():
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL
         )
-        """
-    )
-    db.execute(
-        """
+        """)
+    db.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-        """
-    )
-    db.execute(
-        """
+        """)
+    db.execute("""
         CREATE TABLE IF NOT EXISTS faq (
             id INTEGER PRIMARY KEY,
             question TEXT NOT NULL,
             answer TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
-        """
-    )
+        """)
     # Migration for existing databases with an older schema
     table_cols = [r[1] for r in db.execute("PRAGMA table_info(tables)").fetchall()]
     if "pos_x" not in table_cols:
@@ -224,9 +229,60 @@ def init_db():
     if "voucher_code" not in reg_cols:
         db.execute("ALTER TABLE registrations ADD COLUMN voucher_code TEXT")
     if "payment_method" not in reg_cols:
-        db.execute("ALTER TABLE registrations ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'paypal'")
+        db.execute(
+            "ALTER TABLE registrations ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'paypal'"
+        )
     if "reminder_sent" not in reg_cols:
         db.execute("ALTER TABLE registrations ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0")
+
+    # Serialize schema upgrades across WSGI workers and preserve existing bookings.
+    additions = {
+        "owner_id": "TEXT",
+        "create_request_id": "TEXT",
+        "capture_request_id": "TEXT",
+        "payment_reference": "TEXT",
+        "payment_received_at": "TEXT",
+        "payment_review": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column, definition in additions.items():
+        if column not in reg_cols:
+            db.execute(f"ALTER TABLE registrations ADD COLUMN {column} {definition}")
+    # Existing transfers must keep the reference already sent to the customer.
+    db.execute(
+        "UPDATE registrations SET payment_reference='FLOHMARKT-' || "
+        "(SELECT number FROM tables WHERE tables.id=registrations.table_id) "
+        "WHERE payment_method='sepa' AND payment_reference IS NULL"
+    )
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS payment_receipts (
+            capture_id TEXT PRIMARY KEY,
+            registration_id INTEGER NOT NULL,
+            amount TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            received_at TEXT NOT NULL
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS email_outbox (
+            id INTEGER PRIMARY KEY,
+            registration_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            recipient TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at REAL NOT NULL DEFAULT 0,
+            locked_until REAL NOT NULL DEFAULT 0,
+            lease_token TEXT,
+            sent_at TEXT,
+            cancelled_at TEXT,
+            last_error TEXT,
+            UNIQUE(registration_id, kind)
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS registrations_paypal_order ON registrations(paypal_order_id)"
+    )
 
     # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
     # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
@@ -243,10 +299,13 @@ def init_db():
     if faq_count == 0:
         placeholder_faq = [
             ("Muss ich meinen Tisch selbst aufbauen?", "<Bitte hier die Antwort eintragen>"),
-            ("Was passiert, wenn ich nicht rechtzeitig bezahle?", "<Bitte hier die Antwort eintragen>"),
+            (
+                "Was passiert, wenn ich nicht rechtzeitig bezahle?",
+                "<Bitte hier die Antwort eintragen>",
+            ),
             ("Kann ich meine Reservierung stornieren?", "<Bitte hier die Antwort eintragen>"),
         ]
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utcnow().isoformat()
         for question, answer in placeholder_faq:
             db.execute(
                 "INSERT INTO faq (question, answer, created_at) VALUES (?, ?, ?)",
@@ -277,6 +336,87 @@ def set_setting(db, key, value):
     db.commit()
 
 
+@contextmanager
+def write_transaction(db):
+    """Acquire the write lock before reading any state used by a state transition."""
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def json_object():
+    if not request.is_json:
+        raise UnsupportedMediaType("Content-Type muss application/json sein.")
+    data = request.get_json()
+    if not isinstance(data, dict):
+        raise BadRequest("Ein JSON-Objekt wird erwartet.")
+    return data
+
+
+def text_field(data, key, limit, required=False):
+    value = data.get(key, "")
+    if not isinstance(value, str):
+        raise BadRequest(f"Ungültiges Feld: {key}.")
+    value = value.strip()
+    if (required and not value) or len(value) > limit or any(ord(c) < 32 for c in value):
+        raise BadRequest(f"Ungültiges Feld: {key}.")
+    return value
+
+
+def positive_id(data, key):
+    value = data.get(key)
+    if type(value) is not int or not 0 < value <= 2147483647:
+        raise BadRequest(f"Ungültiges Feld: {key}.")
+    return value
+
+
+@app.errorhandler(HTTPException)
+def http_error(error):
+    if request.path.startswith(("/api/", "/admin/api/", "/webhooks/")):
+        return jsonify(error=error.description), error.code
+    return error
+
+
+@app.errorhandler(sqlite3.OperationalError)
+def database_error(error):
+    if "locked" not in str(error).lower():
+        raise error
+    return jsonify(error="Bitte versuche es in wenigen Sekunden erneut."), 503
+
+
+def deadline_for(reg):
+    duration = (
+        timedelta(hours=SEPA_HOLD_HOURS)
+        if reg["payment_method"] == "sepa"
+        else timedelta(minutes=HOLD_MINUTES)
+    )
+    return datetime.fromisoformat(reg["created_at"]) + duration
+
+
+def display_deadline(reg):
+    return (
+        deadline_for(reg)
+        .replace(tzinfo=timezone.utc)
+        .astimezone(ZoneInfo("Europe/Berlin"))
+        .strftime("%d.%m.%Y um %H:%M Uhr")
+    )
+
+
+def browser_owner():
+    if "booking_owner" not in session:
+        session["booking_owner"] = secrets.token_urlsafe(32)
+    return session["booking_owner"]
+
+
+def owns_registration(reg):
+    owner = session.get("booking_owner")
+    return bool(reg and owner and reg["owner_id"] and hmac.compare_digest(owner, reg["owner_id"]))
+
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -293,21 +433,24 @@ def is_valid_image(file_bytes):
 
 
 def reserve_voucher(db, code):
-    """Validates a voucher code and reserves one use (atomic enough for this scale).
+    """Validate and reserve one use inside the caller's write transaction.
     Returns (voucher_row, error_message) – error_message is None on success."""
     code = (code or "").strip()
     if not code:
         return None, None
 
-    voucher = db.execute(
-        "SELECT * FROM vouchers WHERE code = ? COLLATE NOCASE", (code,)
-    ).fetchone()
+    voucher = db.execute("SELECT * FROM vouchers WHERE code = ? COLLATE NOCASE", (code,)).fetchone()
     if voucher is None or not voucher["active"]:
         return None, "Dieser Gutscheincode ist ungültig."
     if voucher["used_count"] >= voucher["max_uses"]:
         return None, "Dieser Gutscheincode wurde bereits vollständig eingelöst."
 
-    db.execute("UPDATE vouchers SET used_count = used_count + 1 WHERE id=?", (voucher["id"],))
+    cur = db.execute(
+        "UPDATE vouchers SET used_count=used_count+1 WHERE id=? AND active=1 AND used_count<max_uses",
+        (voucher["id"],),
+    )
+    if cur.rowcount != 1:
+        return None, "Dieser Gutscheincode wurde bereits vollständig eingelöst."
     return voucher, None
 
 
@@ -326,41 +469,48 @@ def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("is_admin"):
-            return redirect(url_for("admin_login", next=request.path))
+            return redirect(url_for("admin_login"))
         return view(*args, **kwargs)
 
     return wrapped
 
 
+def cancel_registration_locked(db, reg):
+    """Release only this registration's table and voucher under the write lock."""
+    if reg["status"] == "cancelled":
+        return False
+    release_voucher(db, reg["voucher_code"])
+    db.execute(
+        "UPDATE registrations SET status='cancelled', "
+        "payment_review=CASE WHEN status='paid' OR payment_received_at IS NOT NULL "
+        "THEN 1 ELSE payment_review END WHERE id=?",
+        (reg["id"],),
+    )
+    db.execute(
+        "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL "
+        "WHERE id=? AND registration_id=?",
+        (reg["table_id"], reg["id"]),
+    )
+    db.execute(
+        "UPDATE email_outbox SET cancelled_at=? WHERE registration_id=? AND sent_at IS NULL",
+        (utcnow().isoformat(), reg["id"]),
+    )
+    return True
+
+
 def release_stale_holds(db):
-    """Releases tables (and any reserved voucher codes) whose hold has expired
-    without payment having been completed. PayPal holds expire after
-    HOLD_MINUTES; SEPA (bank transfer) holds get a much longer window
-    (SEPA_HOLD_HOURS), so each registration's own payment method decides
-    which cutoff applies to it."""
-    now = datetime.utcnow()
-    paypal_cutoff = (now - timedelta(minutes=HOLD_MINUTES)).isoformat()
-    sepa_cutoff = (now - timedelta(hours=SEPA_HOLD_HOURS)).isoformat()
-
-    expired = db.execute(
-        """
-        SELECT id, table_id, voucher_code FROM registrations
-        WHERE status='pending' AND (
-            (COALESCE(payment_method, 'paypal') = 'sepa' AND created_at < ?) OR
-            (COALESCE(payment_method, 'paypal') != 'sepa' AND created_at < ?)
-        )
-        """,
-        (sepa_cutoff, paypal_cutoff),
-    ).fetchall()
-
-    for reg in expired:
-        release_voucher(db, reg["voucher_code"])
-        db.execute("UPDATE registrations SET status='cancelled' WHERE id=?", (reg["id"],))
-        db.execute(
-            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL WHERE id=? AND status='held'",
-            (reg["table_id"],),
-        )
-    db.commit()
+    with write_transaction(db):
+        expired = db.execute(
+            "SELECT * FROM registrations WHERE status='pending' AND ("
+            "(payment_method='sepa' AND created_at < ?) OR "
+            "(payment_method!='sepa' AND created_at < ?))",
+            (
+                (utcnow() - timedelta(hours=SEPA_HOLD_HOURS)).isoformat(),
+                (utcnow() - timedelta(minutes=HOLD_MINUTES)).isoformat(),
+            ),
+        ).fetchall()
+        for reg in expired:
+            cancel_registration_locked(db, reg)
 
 
 # ---------------------------------------------------------------------------
@@ -377,11 +527,16 @@ def paypal_get_access_token():
     return resp.json()["access_token"]
 
 
-def paypal_create_order(amount, reference_id):
+def paypal_create_order(amount, reference_id, request_id):
     token = paypal_get_access_token()
     resp = requests.post(
         f"{PAYPAL_API_BASE}/v2/checkout/orders",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": request_id,
+            "Prefer": "return=representation",
+        },
         json={
             "intent": "CAPTURE",
             "purchase_units": [
@@ -398,11 +553,27 @@ def paypal_create_order(amount, reference_id):
     return resp.json()
 
 
-def paypal_capture_order(order_id):
+def paypal_capture_order(order_id, request_id):
     token = paypal_get_access_token()
     resp = requests.post(
         f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": request_id,
+            "Prefer": "return=representation",
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def paypal_get_order(order_id):
+    token = paypal_get_access_token()
+    resp = requests.get(
+        f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}",
+        headers={"Authorization": f"Bearer {token}"},
         timeout=15,
     )
     resp.raise_for_status()
@@ -507,149 +678,192 @@ def get_email_template(db, kind):
     return subject, body
 
 
-def send_templated_email(db, kind, to_email, **placeholders):
-    """Renders and sends one of the admin-editable email templates. Silently
-    skipped (with a log line) if SMTP is not configured; a send failure never
-    breaks the payment/registration flow that triggered it."""
-    if not SMTP_HOST:
-        print(f"[email] SMTP_HOST not set – skipping {kind} email.")
-        return
-
-    subject_tpl, body_tpl = get_email_template(db, kind)
-    subject = render_email_template(subject_tpl, **placeholders)
-    body = render_email_template(body_tpl, **placeholders)
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
-    msg.set_content(body)
-
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
-            if SMTP_USE_TLS:
-                smtp.starttls()
-            if SMTP_USER:
-                smtp.login(SMTP_USER, SMTP_PASSWORD)
-            smtp.send_message(msg)
-    except Exception as e:
-        print(f"[email] Failed to send {kind} email to {to_email}: {e}")
-
-
-def finalize_paid_registration(db, reg):
-    """Marks a registration as paid, books its table, and sends the
-    confirmation email. Idempotent: safe to call twice for the same
-    registration (e.g. once via the browser's immediate PayPal capture call
-    and again via the async PayPal webhook, or if an admin double-clicks the
-    SEPA confirmation button) – repeat calls are a no-op."""
-    if reg["status"] == "paid":
-        return
-    if reg["status"] == "cancelled":
-        # Payment arrived after the hold had already expired/been cancelled
-        # (e.g. the browser closed right after paying, before the capture
-        # call could fire, and the webhook took too long; or a SEPA transfer
-        # arrived after the 48h window). Don't silently re-book – the table
-        # may meanwhile belong to someone else.
-        print(
-            f"[payment] Payment for already-cancelled registration id={reg['id']} "
-            "– needs manual follow-up in the admin area."
-        )
-        return
-
-    db.execute("UPDATE registrations SET status='paid' WHERE id=?", (reg["id"],))
-    db.execute("UPDATE tables SET status='booked' WHERE id=?", (reg["table_id"],))
-    db.commit()
-
-    table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
-    send_templated_email(
-        db,
-        "confirmation",
-        reg["email"],
+def queue_email(db, kind, reg):
+    """Insert the rendered message in the same transaction as its business event."""
+    table = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+    subject, body = get_email_template(db, kind)
+    values = dict(
         name=reg["name"],
-        tisch=table_row["number"] if table_row else "?",
+        tisch=table["number"],
         preis=f"{reg['price']:.2f} {CURRENCY}",
         gutschein=reg["voucher_code"] or "",
+        referenz=reg["payment_reference"] or "",
+        frist=display_deadline(reg),
+    )
+    db.execute(
+        "INSERT INTO email_outbox (registration_id, kind, recipient, subject, body) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(registration_id,kind) DO NOTHING",
+        (
+            reg["id"],
+            kind,
+            reg["email"],
+            render_email_template(subject, **values),
+            render_email_template(body, **values),
+        ),
     )
 
 
-def send_sepa_reminders(db):
-    """Sends a one-time reminder email to pending bank-transfer registrations
-    that are within 24h of their hold expiring, then marks them so they're
-    never reminded twice. Only makes sense when the hold is longer than 24h
-    in the first place – with a shorter SEPA_HOLD_HOURS there's no meaningful
-    "24h before" moment, so this is a no-op in that case.
+def deliver_email(row):
+    msg = EmailMessage()
+    msg["Subject"] = row["subject"]
+    msg["From"] = SMTP_FROM
+    msg["To"] = row["recipient"]
+    # Reuse a stable Message-ID on retries, including after a worker crash.
+    domain = SMTP_FROM.rsplit("@", 1)[-1] or "localhost"
+    msg["Message-ID"] = f"<flohmarkt-{row['registration_id']}-{row['kind']}@{domain}>"
+    msg.set_content(row["body"])
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+        if SMTP_USE_TLS:
+            smtp.starttls(context=ssl.create_default_context())
+        if SMTP_USER:
+            smtp.login(SMTP_USER, SMTP_PASSWORD)
+        smtp.send_message(msg)
 
-    Safe to call concurrently (e.g. from multiple gunicorn worker processes
-    each running their own background thread): the UPDATE ... WHERE
-    reminder_sent=0 acts as a compare-and-swap, so only the caller that
-    actually flips the flag from 0 to 1 goes on to send the email; a second,
-    near-simultaneous caller sees rowcount=0 and skips it.
-    """
+
+def process_email_outbox(db, limit=20):
+    """Lease work across processes; never hold a database lock during SMTP I/O."""
+    if not SMTP_HOST:
+        return
+    for _ in range(limit):
+        now = time.time()
+        token = uuid.uuid4().hex
+        with write_transaction(db):
+            row = db.execute(
+                "SELECT * FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL "
+                "AND next_attempt_at<=? AND locked_until<=? ORDER BY id LIMIT 1",
+                (now, now),
+            ).fetchone()
+            if row is None:
+                return
+            db.execute(
+                "UPDATE email_outbox SET lease_token=?, locked_until=?, attempts=attempts+1 WHERE id=?",
+                (token, now + 300, row["id"]),
+            )
+        try:
+            deliver_email(row)
+        except Exception as error:
+            with write_transaction(db):
+                db.execute(
+                    "UPDATE email_outbox SET last_error=?, next_attempt_at=?, locked_until=0, lease_token=NULL "
+                    "WHERE id=? AND lease_token=?",
+                    (
+                        type(error).__name__,
+                        time.time() + min(3600, 30 * 2 ** min(row["attempts"], 7)),
+                        row["id"],
+                        token,
+                    ),
+                )
+            app.logger.warning(
+                "Email delivery failed for outbox id=%s (%s)", row["id"], type(error).__name__
+            )
+        else:
+            with write_transaction(db):
+                db.execute(
+                    "UPDATE email_outbox SET sent_at=?, locked_until=0, lease_token=NULL, last_error=NULL "
+                    "WHERE id=? AND lease_token=?",
+                    (utcnow().isoformat(), row["id"], token),
+                )
+                if row["kind"] == "reminder":
+                    db.execute(
+                        "UPDATE registrations SET reminder_sent=1 WHERE id=?",
+                        (row["registration_id"],),
+                    )
+
+
+def finalize_paid_registration(db, registration_id, captures=None):
+    """Record received money separately from allocation, using fresh locked state."""
+    with write_transaction(db):
+        reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
+        if reg is None:
+            return "not_found"
+        now = utcnow().isoformat()
+        if captures is not None:
+            for capture in captures:
+                existing = db.execute(
+                    "SELECT registration_id FROM payment_receipts WHERE capture_id=?",
+                    (capture["id"],),
+                ).fetchone()
+                if existing and existing["registration_id"] != registration_id:
+                    raise ValueError("Capture is already assigned to another registration")
+                db.execute(
+                    "INSERT OR IGNORE INTO payment_receipts VALUES (?, ?, ?, ?, ?)",
+                    (
+                        capture["id"],
+                        registration_id,
+                        capture["amount"]["value"],
+                        capture["amount"]["currency_code"],
+                        now,
+                    ),
+                )
+        db.execute(
+            "UPDATE registrations SET payment_received_at=COALESCE(payment_received_at, ?) WHERE id=?",
+            (now, registration_id),
+        )
+        table = db.execute("SELECT * FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+        if (
+            reg["status"] == "paid"
+            and table["status"] == "booked"
+            and table["registration_id"] == registration_id
+        ):
+            return "already_booked"
+        if reg["status"] == "cancelled" and reg["payment_received_at"]:
+            return "payment_received_unallocated"
+        if (
+            reg["status"] != "pending"
+            or deadline_for(reg) <= utcnow()
+            or table["status"] != "held"
+            or table["registration_id"] != registration_id
+        ):
+            if reg["status"] == "pending":
+                cancel_registration_locked(db, reg)
+            db.execute("UPDATE registrations SET payment_review=1 WHERE id=?", (registration_id,))
+            return "payment_received_unallocated"
+        cur = db.execute(
+            "UPDATE tables SET status='booked' WHERE id=? AND status='held' AND registration_id=?",
+            (reg["table_id"], registration_id),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError("Table ownership changed inside a write transaction")
+        db.execute(
+            "UPDATE registrations SET status='paid' WHERE id=? AND status='pending'",
+            (registration_id,),
+        )
+        db.execute(
+            "UPDATE email_outbox SET cancelled_at=? WHERE registration_id=? AND kind IN ('reminder','sepa') AND sent_at IS NULL",
+            (now, registration_id),
+        )
+        queue_email(db, "confirmation", reg)
+        return "booked"
+
+
+def send_sepa_reminders(db):
     if SEPA_HOLD_HOURS <= 24:
         return
-
-    now = datetime.utcnow()
-    reminder_cutoff = (now - timedelta(hours=SEPA_HOLD_HOURS - 24)).isoformat()
-
-    candidates = db.execute(
-        """
-        SELECT id, table_id, name, email, price, created_at
-        FROM registrations
-        WHERE status='pending' AND payment_method='sepa'
-          AND reminder_sent=0 AND created_at < ?
-        """,
-        (reminder_cutoff,),
-    ).fetchall()
-
-    for reg in candidates:
-        cur = db.execute(
-            "UPDATE registrations SET reminder_sent=1 WHERE id=? AND reminder_sent=0",
-            (reg["id"],),
-        )
-        db.commit()
-        if cur.rowcount == 0:
-            continue  # another worker/thread already claimed this one
-
-        table_row = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
-        table_number = table_row["number"] if table_row else "?"
-        created_at = datetime.fromisoformat(reg["created_at"])
-        deadline_str = (created_at + timedelta(hours=SEPA_HOLD_HOURS)).strftime("%d.%m.%Y um %H:%M Uhr")
-        send_templated_email(
-            db,
-            "reminder",
-            reg["email"],
-            name=reg["name"],
-            tisch=table_number,
-            preis=f"{reg['price']:.2f} {CURRENCY}",
-            referenz=f"FLOHMARKT-{table_number}",
-            frist=deadline_str,
-        )
+    now = utcnow()
+    with write_transaction(db):
+        candidates = db.execute(
+            "SELECT * FROM registrations WHERE status='pending' AND payment_method='sepa' "
+            "AND reminder_sent=0 AND created_at<? AND created_at>?",
+            (
+                (now - timedelta(hours=SEPA_HOLD_HOURS - 24)).isoformat(),
+                (now - timedelta(hours=SEPA_HOLD_HOURS)).isoformat(),
+            ),
+        ).fetchall()
+        for reg in candidates:
+            queue_email(db, "reminder", reg)
 
 
-def _sepa_reminder_loop():
-    """Background loop, started once per worker process at import time (see
-    below), that periodically checks for and sends SEPA reminder emails —
-    independent of whether anyone is actually visiting the site, unlike
-    release_stale_holds() which only runs opportunistically on page/API
-    hits. Runs entirely inside the container; no external scheduler needed."""
-    interval_seconds = 15 * 60
+def _background_loop():
     while True:
-        time.sleep(interval_seconds)
         try:
             with app.app_context():
-                send_sepa_reminders(get_db())
-        except Exception as e:
-            print(f"[reminder] Error while checking SEPA reminders: {e}")
-
-
-# Only start the background thread if SMTP is actually configured (no point
-# looping otherwise, since no email could be sent anyway) — this also means
-# importing this module for local testing without SMTP set (the common case)
-# never spins up background threads sending real emails. Each gunicorn
-# worker process starts its own thread; harmless thanks to the
-# compare-and-swap in send_sepa_reminders() above.
-if SMTP_HOST and os.environ.get("DISABLE_BACKGROUND_TASKS", "false").lower() != "true":
-    threading.Thread(target=_sepa_reminder_loop, daemon=True).start()
+                db = get_db()
+                release_stale_holds(db)
+                send_sepa_reminders(db)
+                process_email_outbox(db)
+        except Exception:
+            app.logger.exception("Background maintenance failed")
+        time.sleep(30)
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +878,7 @@ DEFAULT_EVENT_INFO = ""
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
+    browser_owner()
     db = get_db()
     event_title = get_setting(db, "event_title", DEFAULT_EVENT_TITLE)
     event_info = get_setting(db, "event_info", DEFAULT_EVENT_INFO)
@@ -725,170 +940,285 @@ def api_check_voucher():
 
 
 @app.route("/api/register", methods=["POST"])
-@csrf.exempt
 @limiter.limit("20 per minute")
 def api_register():
-    data = request.get_json(force=True)
-    name = (data.get("name") or "").strip()
-    email = (data.get("email") or "").strip()
-    phone = (data.get("phone") or "").strip()
-    table_number = data.get("table")
-    voucher_input = (data.get("voucher") or "").strip()
-
-    raw_payment_method = data.get("payment_method")
-    if not raw_payment_method:
-        payment_method = DEFAULT_PAYMENT_METHOD
-    elif raw_payment_method in ENABLED_PAYMENT_METHODS:
-        payment_method = raw_payment_method
-    else:
-        return jsonify({"error": "Diese Zahlungsart ist nicht verfügbar."}), 400
-
-    if not name or not email or not table_number:
-        return jsonify({"error": "Name, E-Mail und Tisch sind Pflichtfelder."}), 400
-
+    data = json_object()
+    name = text_field(data, "name", 200, required=True)
+    email = text_field(data, "email", 254, required=True)
+    if not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", email):
+        raise BadRequest("Bitte gib eine gültige E-Mail-Adresse an.")
+    phone = text_field(data, "phone", 50)
+    table_number = positive_id(data, "table")
+    voucher_input = text_field(data, "voucher", 128)
+    payment_method = text_field(data, "payment_method", 20) or DEFAULT_PAYMENT_METHOD
+    if payment_method not in ENABLED_PAYMENT_METHODS:
+        raise BadRequest("Diese Zahlungsart ist nicht verfügbar.")
+    owner = browser_owner()
     db = get_db()
     release_stale_holds(db)
-
-    table = db.execute("SELECT * FROM tables WHERE number=?", (table_number,)).fetchone()
-    if table is None:
-        return jsonify({"error": "Tisch existiert nicht."}), 404
-    if table["status"] != "free":
-        return jsonify({"error": "Dieser Tisch ist leider nicht mehr verfügbar."}), 409
-
-    price = PRICE_STANDARD
-    voucher_code = None
-    if voucher_input:
-        voucher, error = reserve_voucher(db, voucher_input)
-        if error:
-            return jsonify({"error": error}), 400
-        price = PRICE_INTERNAL
-        voucher_code = voucher["code"]
-
-    now = datetime.utcnow()
-    now_iso = now.isoformat()
-    cur = db.execute(
-        "INSERT INTO registrations "
-        "(name, email, phone, table_id, status, created_at, price, voucher_code, payment_method) "
-        "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
-        (name, email, phone, table["id"], now_iso, price, voucher_code, payment_method),
-    )
-    registration_id = cur.lastrowid
-
-    db.execute(
-        "UPDATE tables SET status='held', held_at=?, registration_id=? WHERE id=?",
-        (now_iso, registration_id, table["id"]),
-    )
-    db.commit()
-
-    response = {
-        "registration_id": registration_id,
-        "table": table_number,
-        "price": price,
-        "voucher_applied": voucher_code is not None,
-        "payment_method": payment_method,
-    }
-
-    if payment_method == "sepa":
-        # Uses the table number rather than the registration id, per request –
-        # simpler for visitors to read out/type, at the cost of the reference
-        # no longer being globally unique (a table re-registered via SEPA
-        # after an earlier hold expired or was cancelled reuses the same
-        # reference).
-        reference = f"FLOHMARKT-{table_number}"
-        deadline_dt = now + timedelta(hours=SEPA_HOLD_HOURS)
-        deadline_str = deadline_dt.strftime("%d.%m.%Y um %H:%M Uhr")
-        send_templated_email(
-            db,
-            "sepa",
-            email,
-            name=name,
-            tisch=table_number,
-            preis=f"{price:.2f} {CURRENCY}",
-            referenz=reference,
-            frist=deadline_str,
+    with write_transaction(db):
+        table = db.execute("SELECT * FROM tables WHERE number=?", (table_number,)).fetchone()
+        if table is None:
+            return jsonify(error="Tisch existiert nicht."), 404
+        if table["status"] != "free":
+            return jsonify(error="Dieser Tisch ist leider nicht mehr verfügbar."), 409
+        price, voucher_code = PRICE_STANDARD, None
+        if voucher_input:
+            voucher, error = reserve_voucher(db, voucher_input)
+            if error:
+                raise BadRequest(error)
+            price, voucher_code = PRICE_INTERNAL, voucher["code"]
+        now = utcnow().isoformat()
+        cur = db.execute(
+            "INSERT INTO registrations (name, email, phone, table_id, status, created_at, price, "
+            "voucher_code, payment_method, owner_id, create_request_id, capture_request_id) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+            (
+                name,
+                email,
+                phone,
+                table["id"],
+                now,
+                price,
+                voucher_code,
+                payment_method,
+                owner,
+                str(uuid.uuid4()),
+                str(uuid.uuid4()),
+            ),
         )
-        response["reference"] = reference
-        response["deadline"] = deadline_str
-
+        registration_id = cur.lastrowid
+        cur = db.execute(
+            "UPDATE tables SET status='held', held_at=?, registration_id=? "
+            "WHERE id=? AND status='free'",
+            (now, registration_id, table["id"]),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError("Table ownership changed inside a write transaction")
+        reference = f"FLOHMARKT-{table_number}-{registration_id}"
+        db.execute(
+            "UPDATE registrations SET payment_reference=? WHERE id=?", (reference, registration_id)
+        )
+        reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
+        if payment_method == "sepa":
+            queue_email(db, "sepa", reg)
+    response = dict(
+        registration_id=registration_id,
+        table=table_number,
+        price=price,
+        voucher_applied=voucher_code is not None,
+        payment_method=payment_method,
+    )
+    if payment_method == "sepa":
+        response.update(reference=reference, deadline=display_deadline(reg))
     return jsonify(response)
 
 
+def paypal_unavailable():
+    return (
+        jsonify(
+            error="Der Zahlungsstatus konnte noch nicht sicher ermittelt werden. "
+            "Bitte versuche es erneut. Deine bestehende Zahlung wird dabei geprüft."
+        ),
+        503,
+    )
+
+
+def booking_response(outcome):
+    if outcome in ("booked", "already_booked"):
+        return jsonify(status="paid", booking_status=outcome)
+    if outcome == "payment_review":
+        return (
+            jsonify(
+                status=outcome,
+                error="Die Zahlungsdaten müssen vom Veranstalter geprüft werden. "
+                "Eine erfolgreiche Tischbuchung konnte noch nicht bestätigt werden.",
+            ),
+            409,
+        )
+    return (
+        jsonify(
+            status=outcome,
+            error="Deine Zahlung ist eingegangen, aber der Tisch konnte nicht "
+            "zugeordnet werden. Bitte kontaktiere den Veranstalter zur Klärung oder Erstattung.",
+        ),
+        409,
+    )
+
+
+def completed_captures(order, reg):
+    """Validate the complete server-side order before allocating a table."""
+    if order.get("id") != reg["paypal_order_id"]:
+        raise ValueError("Unexpected PayPal order ID")
+    if order.get("status") != "COMPLETED":
+        return None
+    units = order.get("purchase_units", [])
+    if len(units) != 1 or units[0].get("reference_id") != str(reg["id"]):
+        raise ValueError("Unexpected purchase units or registration reference")
+    captures = units[0].get("payments", {}).get("captures", [])
+    if not captures or any(c.get("status") != "COMPLETED" for c in captures):
+        raise ValueError("Order does not contain completed captures")
+    total = Decimal("0")
+    seen = set()
+    for capture in captures:
+        capture_id = capture.get("id")
+        if (
+            not isinstance(capture_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9]{1,64}", capture_id)
+            or capture_id in seen
+        ):
+            raise ValueError("Invalid or duplicate capture ID")
+        seen.add(capture_id)
+        amount = capture.get("amount", {})
+        value = Decimal(amount.get("value", "NaN"))
+        if amount.get("currency_code") != CURRENCY or not value.is_finite() or value <= 0:
+            raise ValueError("Unexpected capture amount or currency")
+        total += value
+    if total != Decimal(f"{reg['price']:.2f}"):
+        raise ValueError("Captured amount does not match the registration")
+    return captures
+
+
+def record_completed_order(db, reg, order):
+    try:
+        captures = completed_captures(order, reg)
+    except (ValueError, InvalidOperation, TypeError, KeyError, AttributeError):
+        with write_transaction(db):
+            db.execute("UPDATE registrations SET payment_review=1 WHERE id=?", (reg["id"],))
+        app.logger.error("PayPal order validation failed for registration id=%s", reg["id"])
+        return "payment_review"
+    if captures is None:
+        return None
+    return finalize_paid_registration(db, reg["id"], captures)
+
+
 @app.route("/api/create-order", methods=["POST"])
-@csrf.exempt
 @limiter.limit("20 per minute")
 def api_create_order():
-    data = request.get_json(force=True)
-    registration_id = data.get("registration_id")
-
+    registration_id = positive_id(json_object(), "registration_id")
     db = get_db()
-    reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
-    if reg is None or reg["status"] != "pending":
-        return jsonify({"error": "Registrierung nicht gefunden oder bereits abgeschlossen."}), 404
-    if reg["payment_method"] != "paypal":
-        return jsonify({"error": "Diese Registrierung nutzt keine PayPal-Zahlung."}), 400
-
-    order = paypal_create_order(reg["price"], reference_id=str(registration_id))
-    db.execute("UPDATE registrations SET paypal_order_id=? WHERE id=?", (order["id"], registration_id))
-    db.commit()
-    return jsonify({"order_id": order["id"]})
+    release_stale_holds(db)
+    with write_transaction(db):
+        reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
+        if not owns_registration(reg):
+            return jsonify(error="Registrierung nicht gefunden."), 404
+        if reg["status"] != "pending" or reg["payment_method"] != "paypal" or reg["payment_review"]:
+            return jsonify(error="Diese Registrierung kann nicht mehr bezahlt werden."), 409
+        if reg["paypal_order_id"]:
+            return jsonify(order_id=reg["paypal_order_id"])
+        # Persist one key before network I/O so retries and workers use the same operation.
+        if not reg["create_request_id"]:
+            db.execute(
+                "UPDATE registrations SET create_request_id=?, capture_request_id=? WHERE id=?",
+                (str(uuid.uuid4()), str(uuid.uuid4()), registration_id),
+            )
+            reg = db.execute(
+                "SELECT * FROM registrations WHERE id=?", (registration_id,)
+            ).fetchone()
+    try:
+        order = paypal_create_order(reg["price"], str(registration_id), reg["create_request_id"])
+        order_id = order.get("id")
+        if not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9]{1,64}", order_id):
+            raise ValueError("Invalid PayPal order ID")
+    except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        app.logger.warning(
+            "PayPal order creation unresolved for registration id=%s", registration_id
+        )
+        return paypal_unavailable()
+    with write_transaction(db):
+        current = db.execute(
+            "SELECT * FROM registrations WHERE id=?", (registration_id,)
+        ).fetchone()
+        if current["paypal_order_id"] and current["paypal_order_id"] != order_id:
+            db.execute("UPDATE registrations SET payment_review=1 WHERE id=?", (registration_id,))
+            return jsonify(error="Die Zahlung muss vom Veranstalter geprüft werden."), 409
+        db.execute(
+            "UPDATE registrations SET paypal_order_id=? WHERE id=? AND paypal_order_id IS NULL",
+            (order_id, registration_id),
+        )
+        # Retain the mapping even if a cancellation happened during the API request.
+        if current["status"] != "pending" or deadline_for(current) <= utcnow():
+            return (
+                jsonify(error="Diese Reservierung ist inzwischen abgelaufen oder storniert."),
+                409,
+            )
+    return jsonify(order_id=order_id)
 
 
 @app.route("/api/capture-order", methods=["POST"])
-@csrf.exempt
 @limiter.limit("20 per minute")
 def api_capture_order():
-    data = request.get_json(force=True)
-    order_id = data.get("order_id")
-
+    order_id = text_field(json_object(), "order_id", 64, required=True)
+    if not re.fullmatch(r"[A-Za-z0-9]+", order_id):
+        raise BadRequest("Ungültige Bestellnummer.")
     db = get_db()
     reg = db.execute("SELECT * FROM registrations WHERE paypal_order_id=?", (order_id,)).fetchone()
-    if reg is None:
-        return jsonify({"error": "Bestellung nicht gefunden."}), 404
-
-    result = paypal_capture_order(order_id)
-    status = result.get("status")
-
-    if status == "COMPLETED":
-        finalize_paid_registration(db, reg)
-        return jsonify({"status": "paid"})
-
-    return jsonify({"error": "Zahlung nicht abgeschlossen.", "paypal_status": status}), 402
+    if not owns_registration(reg):
+        return jsonify(error="Bestellung nicht gefunden."), 404
+    # Reconcile first: a previous capture may have succeeded despite a timeout.
+    try:
+        order = paypal_get_order(order_id)
+        outcome = record_completed_order(db, reg, order)
+        if outcome:
+            return booking_response(outcome)
+        release_stale_holds(db)
+        with write_transaction(db):
+            reg = db.execute("SELECT * FROM registrations WHERE id=?", (reg["id"],)).fetchone()
+            if reg["payment_review"]:
+                return booking_response("payment_review")
+            if reg["status"] != "pending":
+                return jsonify(error="Diese Reservierung kann nicht mehr bezahlt werden."), 409
+            if not reg["capture_request_id"]:
+                db.execute(
+                    "UPDATE registrations SET capture_request_id=? WHERE id=?",
+                    (str(uuid.uuid4()), reg["id"]),
+                )
+                reg = db.execute("SELECT * FROM registrations WHERE id=?", (reg["id"],)).fetchone()
+        try:
+            order = paypal_capture_order(order_id, reg["capture_request_id"])
+            if order.get("status") == "COMPLETED" and not order.get("purchase_units"):
+                order = paypal_get_order(order_id)
+        except requests.RequestException:
+            # A failed response is not proof that no money moved.
+            order = paypal_get_order(order_id)
+            if order.get("status") != "COMPLETED":
+                return paypal_unavailable()
+        outcome = record_completed_order(db, reg, order)
+        if outcome:
+            return booking_response(outcome)
+        return jsonify(error="Zahlung noch nicht abgeschlossen. Bitte versuche es erneut."), 402
+    except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        app.logger.warning("PayPal capture unresolved for registration id=%s", reg["id"])
+        return paypal_unavailable()
 
 
 @app.route("/webhooks/paypal", methods=["POST"])
 @csrf.exempt
 @limiter.limit("60 per minute")
 def paypal_webhook():
-    """Server-to-server notification from PayPal – the safety net in case the
-    browser's own /api/capture-order call never arrives (e.g. tab closed
-    right after paying). Every request is signature-verified against
-    PAYPAL_WEBHOOK_ID before anything in it is trusted."""
+    event = json_object()
     try:
-        event = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "invalid json"}), 400
-
-    if not event or not paypal_verify_webhook_signature(request.headers, event):
-        return jsonify({"error": "invalid signature"}), 400
-
-    if event.get("event_type") == "PAYMENT.CAPTURE.COMPLETED":
-        order_id = (
-            event.get("resource", {})
-            .get("supplementary_data", {})
-            .get("related_ids", {})
-            .get("order_id")
-        )
-        if order_id:
+        if not paypal_verify_webhook_signature(request.headers, event):
+            return jsonify(error="invalid signature"), 400
+        if event.get("event_type") == "PAYMENT.CAPTURE.COMPLETED":
+            resource = event.get("resource", {})
+            order_id = resource.get("supplementary_data", {}).get("related_ids", {}).get("order_id")
+            if not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9]{1,64}", order_id):
+                raise BadRequest("Invalid order ID")
             db = get_db()
             reg = db.execute(
                 "SELECT * FROM registrations WHERE paypal_order_id=?", (order_id,)
             ).fetchone()
-            if reg is not None:
-                finalize_paid_registration(db, reg)
-
-    # Always 200 for anything we don't act on, too – PayPal retries on
-    # non-2xx responses, and event types we don't handle aren't errors.
-    return jsonify({"ok": True})
+            if reg is None:
+                # A creation request may still be persisting the order mapping.
+                return jsonify(error="Order mapping not available yet"), 503
+            outcome = record_completed_order(db, reg, paypal_get_order(order_id))
+            if outcome is None:
+                return jsonify(error="Capture not available yet"), 503
+        return jsonify(ok=True)
+    except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        app.logger.warning("PayPal webhook processing unresolved")
+        return jsonify(error="Payment verification temporarily unavailable"), 503
 
 
 # ---------------------------------------------------------------------------
@@ -902,8 +1232,7 @@ def admin_login():
         if ADMIN_PASSWORD and hmac.compare_digest(password.encode(), ADMIN_PASSWORD.encode()):
             session.permanent = True
             session["is_admin"] = True
-            next_url = request.args.get("next") or url_for("admin_dashboard")
-            return redirect(next_url)
+            return redirect(url_for("admin_dashboard"))
         flash("Falsches Passwort.")
     return render_template("admin_login.html")
 
@@ -922,32 +1251,30 @@ def admin_dashboard():
 
     view = request.args.get("view")
     view = "history" if view == "history" else "active"
-    status_filter = "r.status = 'cancelled'" if view == "history" else "r.status != 'cancelled'"
+    status_filter = (
+        "r.status = 'cancelled'"
+        if view == "history"
+        else "(r.status != 'cancelled' OR r.payment_review=1)"
+    )
 
-    rows = db.execute(
-        f"""
+    rows = db.execute(f"""
         SELECT r.id, r.name, r.email, r.phone, r.status, r.created_at, r.price, r.voucher_code,
-               r.payment_method, t.number AS table_number
+               r.payment_method, r.payment_reference, r.payment_received_at, r.payment_review, t.number AS table_number
         FROM registrations r
         JOIN tables t ON t.id = r.table_id
         WHERE {status_filter}
         ORDER BY t.number
-        """
-    ).fetchall()
-    stats = db.execute(
-        "SELECT status, COUNT(*) AS n FROM tables GROUP BY status"
-    ).fetchall()
+        """).fetchall()
+    stats = db.execute("SELECT status, COUNT(*) AS n FROM tables GROUP BY status").fetchall()
     stats = {r["status"]: r["n"] for r in stats}
 
     image = get_setting(db, "floorplan_image")
-    plan_tables = db.execute(
-        """
+    plan_tables = db.execute("""
         SELECT number, status, pos_x, pos_y
         FROM tables
         WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
         ORDER BY number
-        """
-    ).fetchall()
+        """).fetchall()
 
     return render_template(
         "admin_dashboard.html",
@@ -958,6 +1285,12 @@ def admin_dashboard():
         floorplan_image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         plan_tables=plan_tables,
         view=view,
+        pending_emails=db.execute(
+            "SELECT COUNT(*) FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL"
+        ).fetchone()[0],
+        failed_emails=db.execute(
+            "SELECT COUNT(*) FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL AND last_error IS NOT NULL"
+        ).fetchone()[0],
     )
 
 
@@ -965,24 +1298,12 @@ def admin_dashboard():
 @login_required
 def admin_cancel(registration_id):
     db = get_db()
-    reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
-    if reg is not None and reg["status"] != "cancelled":
-        release_voucher(db, reg["voucher_code"])
-        db.execute("UPDATE registrations SET status='cancelled' WHERE id=?", (registration_id,))
-        # The AND registration_id=? guard matters now that cancelled entries
-        # stay visible (in the history tab): without it, a stale "Freigeben"
-        # click on an old entry could free a table that has since been
-        # rebooked by someone else, since it would otherwise match purely on
-        # table_id regardless of who currently holds it.
-        db.execute(
-            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL "
-            "WHERE id=? AND registration_id=?",
-            (reg["table_id"], registration_id),
-        )
-        db.commit()
-        flash("Tisch wurde freigegeben.")
-    elif reg is not None:
-        flash("Diese Registrierung ist bereits storniert.")
+    with write_transaction(db):
+        reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
+        if reg and cancel_registration_locked(db, reg):
+            flash("Tisch wurde freigegeben. Bereits eingegangene Zahlungen bitte separat klären.")
+        else:
+            flash("Diese Registrierung ist bereits storniert oder existiert nicht.")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -991,15 +1312,25 @@ def admin_cancel(registration_id):
 def admin_confirm_sepa(registration_id):
     db = get_db()
     reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
-    if reg is None:
-        flash("Registrierung nicht gefunden.")
-    elif reg["payment_method"] != "sepa":
-        flash("Diese Registrierung nutzt keine Überweisung.")
-    elif reg["status"] != "pending":
-        flash("Diese Registrierung ist nicht mehr offen.")
+    if reg is None or reg["payment_method"] != "sepa":
+        flash("Überweisungsregistrierung nicht gefunden.")
     else:
-        finalize_paid_registration(db, reg)
-        flash("Zahlung bestätigt – der Tisch ist jetzt gebucht.")
+        outcome = finalize_paid_registration(db, registration_id)
+        if outcome in ("booked", "already_booked"):
+            flash("Zahlung bestätigt – der Tisch ist gebucht.")
+        else:
+            flash(
+                "Zahlung erfasst, aber kein Tisch zugeordnet. Bitte Zuordnung oder Erstattung klären."
+            )
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/resolve-payment/<int:registration_id>", methods=["POST"])
+@login_required
+def admin_resolve_payment(registration_id):
+    with write_transaction(get_db()):
+        get_db().execute("UPDATE registrations SET payment_review=0 WHERE id=?", (registration_id,))
+    flash("Zahlung als geprüft markiert. Es wurde keine automatische Erstattung ausgelöst.")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -1024,7 +1355,7 @@ def admin_vouchers():
                     db.execute(
                         "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
                         "VALUES (?, ?, 0, 1, ?)",
-                        (code, max_uses, datetime.utcnow().isoformat()),
+                        (code, max_uses, utcnow().isoformat()),
                     )
                     db.commit()
                     flash(f"Gutscheincode „{code}“ wurde angelegt.")
@@ -1045,7 +1376,7 @@ def admin_vouchers():
                         db.execute(
                             "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
                             "VALUES (?, 1, 0, 1, ?)",
-                            (code, datetime.utcnow().isoformat()),
+                            (code, utcnow().isoformat()),
                         )
                         created.append(code)
                         break
@@ -1053,7 +1384,9 @@ def admin_vouchers():
                         # Extremely unlikely code collision – try again with a new one.
                         continue
                 else:
-                    flash("Ein Code konnte nach mehreren Versuchen nicht eindeutig generiert werden – bitte erneut versuchen.")
+                    flash(
+                        "Ein Code konnte nach mehreren Versuchen nicht eindeutig generiert werden – bitte erneut versuchen."
+                    )
             db.commit()
             if created:
                 flash(f"{len(created)} Einzel-Codes erstellt: " + ", ".join(created))
@@ -1090,12 +1423,14 @@ def admin_emails():
         if kind in ("confirmation", "sepa", "reminder"):
             subject = (request.form.get("subject") or "").strip()
             body = (request.form.get("body") or "").strip()
-            if subject and body:
+            if subject and body and "\r" not in subject and "\n" not in subject:
                 set_setting(db, f"email_{kind}_subject", subject)
                 set_setting(db, f"email_{kind}_body", body)
                 flash("E-Mail-Text wurde gespeichert.")
             else:
-                flash("Betreff und Text dürfen nicht leer sein.")
+                flash(
+                    "Betreff und Text dürfen nicht leer sein; der Betreff darf keine Zeilenumbrüche enthalten."
+                )
         return redirect(url_for("admin_emails"))
 
     confirmation_subject, confirmation_body = get_email_template(db, "confirmation")
@@ -1154,7 +1489,7 @@ def admin_faq():
             else:
                 db.execute(
                     "INSERT INTO faq (question, answer, created_at) VALUES (?, ?, ?)",
-                    (question, answer, datetime.utcnow().isoformat()),
+                    (question, answer, utcnow().isoformat()),
                 )
                 db.commit()
                 flash("Frage wurde hinzugefügt.")
@@ -1214,7 +1549,9 @@ def admin_floorplan():
         return redirect(url_for("admin_floorplan"))
 
     image = get_setting(db, "floorplan_image")
-    tables = db.execute("SELECT number, status, pos_x, pos_y FROM tables ORDER BY number").fetchall()
+    tables = db.execute(
+        "SELECT number, status, pos_x, pos_y FROM tables ORDER BY number"
+    ).fetchall()
     return render_template(
         "admin_floorplan.html",
         image_url=url_for("static", filename=f"uploads/{image}") if image else None,
@@ -1225,10 +1562,12 @@ def admin_floorplan():
 @app.route("/admin/api/set-position", methods=["POST"])
 @login_required
 def admin_set_position():
-    data = request.get_json(force=True)
-    number = data.get("number")
+    data = json_object()
+    number = positive_id(data, "number")
     x = data.get("x")
     y = data.get("y")
+    if any(type(value) not in (int, float) or not 0 <= value <= 100 for value in (x, y)):
+        raise BadRequest("Positionen müssen Zahlen zwischen 0 und 100 sein.")
 
     db = get_db()
     db.execute("UPDATE tables SET pos_x=?, pos_y=? WHERE number=?", (x, y, number))
@@ -1239,13 +1578,18 @@ def admin_set_position():
 @app.route("/admin/api/clear-position", methods=["POST"])
 @login_required
 def admin_clear_position():
-    data = request.get_json(force=True)
-    number = data.get("number")
+    data = json_object()
+    number = positive_id(data, "number")
 
     db = get_db()
     db.execute("UPDATE tables SET pos_x=NULL, pos_y=NULL WHERE number=?", (number,))
     db.commit()
     return jsonify({"ok": True})
+
+
+# Start only after all functions and routes have been defined.
+if os.environ.get("DISABLE_BACKGROUND_TASKS", "false").lower() != "true":
+    threading.Thread(target=_background_loop, daemon=True).start()
 
 
 if __name__ == "__main__":

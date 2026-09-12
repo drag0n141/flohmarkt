@@ -38,4 +38,5 @@ EXPOSE 8000
 # The only paths this app itself writes to are DB_PATH and static/uploads,
 # both of which are already expected to be mounted volumes in the
 # Deployment.
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "--worker-tmp-dir", "/tmp", "--no-control-socket", "--access-logfile", "-", "app:app"]
+# Allow the bounded PayPal lookup/capture/reconciliation sequence to finish.
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "--worker-tmp-dir", "/dev/shm", "--no-control-socket", "--timeout", "120", "--access-logfile", "-", "app:app"]

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>Flohmarkt – Tischvergabe</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -41,17 +42,18 @@
         </div>
       </div>
       <div id="grid" class="grid"></div>
+      <p id="tables-error" class="error" role="alert"></p>
     </div>
 
     <div id="step-form" class="card" hidden>
       <h2>2. Deine Daten</h2>
       <p>Ausgewählter Tisch: <strong id="selected-table-label"></strong></p>
       <form id="reg-form">
-        <label>Name*<input type="text" id="name" required></label>
-        <label>E-Mail*<input type="email" id="email" required></label>
-        <label>Telefon<input type="tel" id="phone"></label>
+        <label>Name*<input type="text" id="name" maxlength="200" required></label>
+        <label>E-Mail*<input type="email" id="email" maxlength="254" required></label>
+        <label>Telefon<input type="tel" id="phone" maxlength="50"></label>
         <label>Gutscheincode (optional)
-          <input type="text" id="voucher" placeholder="z. B. MG-1A2B3C">
+          <input type="text" id="voucher" maxlength="128" placeholder="z. B. MG-1A2B3C">
         </label>
         <p id="voucher-feedback" class="hint"></p>
 
@@ -92,7 +94,8 @@
          Zu zahlen: <strong id="pay-price-label"></strong>.
          Bitte schließe die Zahlung ab, um den Tisch verbindlich zu buchen.</p>
       <div id="paypal-button-container"></div>
-      <p id="pay-error" class="error"></p>
+      <p id="pay-error" class="error" role="alert"></p>
+      <button id="retry-payment" type="button" hidden>Zahlungsstatus erneut prüfen</button>
     </div>
 
     <div id="step-sepa-pending" class="card" hidden>
@@ -101,15 +104,22 @@
          <strong id="sepa-deadline-label"></strong> für dich reserviert.
          Zu zahlen: <strong id="sepa-price-label"></strong>, Verwendungszweck:
          <strong id="sepa-reference-label"></strong>.</p>
-      <p class="hint">Die Bankverbindung und alle Details haben wir dir gerade per E-Mail geschickt.
+      <p class="hint">Die Bankverbindung und alle Details werden dir per E-Mail zugeschickt.
+         Falls keine E-Mail ankommt, kontaktiere bitte den Veranstalter.
          Sobald deine Überweisung bei uns eingegangen und bestätigt ist, ist der Tisch verbindlich
          gebucht. Geht die Zahlung nicht rechtzeitig ein, wird die Reservierung automatisch aufgehoben.</p>
+    </div>
+
+    <div id="step-payment-review" class="card" hidden>
+      <h2>Zahlung wird geklärt</h2>
+      <p id="payment-review-message" role="alert"></p>
+      <p>Bitte bezahle nicht erneut. Der Veranstalter kann den Vorgang in der Verwaltung prüfen.</p>
     </div>
 
     <div id="step-done" class="card" hidden>
       <h2>Fertig! 🎉</h2>
       <p>Deine Zahlung war erfolgreich. Tisch <strong id="done-table-label"></strong> ist für dich reserviert.
-         Eine Bestätigung wurde an deine E-Mail-Adresse gesendet.</p>
+         Eine Bestätigung wird dir per E-Mail zugeschickt.</p>
     </div>
   </div>
 
