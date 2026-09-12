@@ -84,7 +84,7 @@ are enabled — see above). Bank transfer:
 1. Holds the table for `SEPA_HOLD_HOURS` (default 48h) instead of the
    10-minute PayPal hold.
 2. Queues an email for background delivery with the bank details, amount, and a payment
-   reference (`FLOHMARKT-<table number>-<registration id>`) so incoming transfers can be
+   reference (`FLOHMARKT-<table number>`) so incoming transfers can be
    matched — see **Editable emails** below for where those bank details
    (IBAN/BIC/account holder) actually live.
 3. Requires an admin to manually confirm the incoming payment in `/admin`
@@ -192,8 +192,8 @@ Editing a template affects newly queued messages, not already rendered jobs.
 4. Stop the old workers before starting the new version against the database.
    Startup adds the new columns and outbox/payment-receipt tables automatically.
    Concurrent new workers serialize the migration; existing records are retained.
-5. Existing SEPA references remain `FLOHMARKT-<table number>` because customers
-   may already have used them. Only new registrations receive unique references.
+5. Both existing and new SEPA registrations use `FLOHMARKT-<table number>`.
+   The reference intentionally remains the same when a table is rebooked.
    Past messages are not reconstructed or resent; previously sent reminder flags
    remain intact. Previously unrecorded payments require manual reconciliation.
 6. Keep background tasks enabled and test PayPal sandbox checkout and SMTP

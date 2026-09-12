@@ -356,7 +356,7 @@ def test_login_ignores_external_redirect(mod):
     assert client.get("/admin").status_code == 200
 
 
-def test_sepa_hold_unchanged_and_unique_reference(mod):
+def test_sepa_hold_and_table_reference_remain_unchanged(mod):
     client, headers = client_for(mod)
     first = register(client, headers, payment_method="sepa").json
     reg = get_reg(mod, first["registration_id"])
@@ -364,7 +364,7 @@ def test_sepa_hold_unchanged_and_unique_reference(mod):
     with connect(mod) as db, mod.write_transaction(db):
         mod.cancel_registration_locked(db, reg)
     second = register(client, headers, payment_method="sepa").json
-    assert first["reference"] != second["reference"]
+    assert first["reference"] == second["reference"] == "FLOHMARKT-1"
     with connect(mod) as db:
         assert (
             db.execute("SELECT COUNT(*) FROM email_outbox WHERE cancelled_at IS NULL").fetchone()[0]

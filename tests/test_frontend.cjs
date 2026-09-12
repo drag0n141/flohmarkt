@@ -95,11 +95,11 @@ for (const status of ['payment_received_unallocated', 'payment_review']) {
 test('SEPA immediately displays the supplied reference and deadline', async () => {
   const ui = harness(url => url === '/api/register' ? { status:200, body:{
     registration_id:1, table:1, price:15, payment_method:'sepa',
-    reference:'FLOHMARKT-1-1', deadline:'14.09.2026 um 12:00 Uhr',
+    reference:'FLOHMARKT-1', deadline:'14.09.2026 um 12:00 Uhr',
   }} : null);
   await ui.register();
   assert.equal(ui.element('step-sepa-pending').hidden, false);
-  assert.equal(ui.element('sepa-reference-label').textContent, 'FLOHMARKT-1-1');
+  assert.equal(ui.element('sepa-reference-label').textContent, 'FLOHMARKT-1');
   assert.equal(ui.element('step-done').hidden, true);
 });
 

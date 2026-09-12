@@ -995,7 +995,8 @@ def api_register():
         )
         if cur.rowcount != 1:
             raise RuntimeError("Table ownership changed inside a write transaction")
-        reference = f"FLOHMARKT-{table_number}-{registration_id}"
+        # Keep the table-only transfer reference chosen for this event.
+        reference = f"FLOHMARKT-{table_number}"
         db.execute(
             "UPDATE registrations SET payment_reference=? WHERE id=?", (reference, registration_id)
         )
