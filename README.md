@@ -199,9 +199,10 @@ Editing a template affects newly queued messages, not already rendered jobs.
 6. Keep background tasks enabled and test PayPal sandbox checkout and SMTP
    delivery with the actual deployment configuration before accepting payments.
 
-The Docker command uses `/dev/shm` for Gunicorn worker temporary files as described
-in the Dockerfile. Mount the database directory and `static/uploads` as writable
-volumes when using a read-only root filesystem. Do not use Gunicorn `--preload`:
+The Docker command uses `/tmp` for Gunicorn worker temporary files. In Kubernetes,
+mount an `emptyDir` volume at `/tmp` and ensure it is writable by appuser (UID 1000).
+The mounted volume remains writable with `readOnlyRootFilesystem: true`.
+Also mount the database directory and `static/uploads` as writable volumes. Do not use Gunicorn `--preload`:
 maintenance threads are started when each worker imports the application.
 
 ## Tests

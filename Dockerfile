@@ -22,11 +22,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
-# --worker-tmp-dir /dev/shm: gunicorn's worker heartbeat file normally lives
-# under /tmp, which is part of the container's root filesystem. Pointing it
-# at /dev/shm (a tmpfs Kubernetes mounts separately from the root fs, present
-# on every pod by default) lets this run with readOnlyRootFilesystem: true
-# without needing an extra emptyDir volume just for that one file.
+# --worker-tmp-dir /tmp: Kubernetes mounts an emptyDir volume at /tmp.
+# This volume remains writable with readOnlyRootFilesystem: true.
+# Ensure the mounted volume is writable by appuser (UID 1000).
 #
 # --no-control-socket: gunicorn 25.1+ creates a control socket for the
 # `gunicornc` CLI tool by default, under $XDG_RUNTIME_DIR or
@@ -39,4 +37,4 @@ EXPOSE 8000
 # both of which are already expected to be mounted volumes in the
 # Deployment.
 # Allow the bounded PayPal lookup/capture/reconciliation sequence to finish.
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "--worker-tmp-dir", "/dev/shm", "--no-control-socket", "--timeout", "120", "--access-logfile", "-", "app:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "--worker-tmp-dir", "/tmp", "--no-control-socket", "--timeout", "120", "--access-logfile", "-", "app:app"]
