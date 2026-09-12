@@ -220,5 +220,6 @@ rollback, late/repeated payments, ownership/CSRF checks, timeout reconciliation,
 email retries and concurrent leases, and upgrades from the legacy schema.
 The Node tests exercise frontend request construction and payment-state changes
 with a lightweight DOM stub; they do not test browser rendering or the real
-PayPal SDK. The CI workflow runs these checks on pull requests and before
-publishing images.
+PayPal SDK. Run these commands before merging or publishing an image.
+The existing image workflow does not yet run this suite automatically; adding
+the test job requires permission to edit `.github/workflows/docker-publish.yml`.
