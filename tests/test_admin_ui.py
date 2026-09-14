@@ -103,6 +103,6 @@ def test_destructive_actions_are_marked_as_such(mod):
         data={"action": "archive", "confirm": "yes", "archive_name": "Vorbei"},
     )
     assert (
-        '<button type="submit" class="danger small">L\u00f6schen</button>'
+        '<button type="submit" class="danger small">Löschen</button>'
         in client.get("/admin/event").text
     )
