@@ -237,6 +237,9 @@ def init_db():
 
     # Serialize schema upgrades across WSGI workers and preserve existing bookings.
     additions = {
+        "expires_at": "TEXT",
+        "create_attempted_at": "TEXT",
+        "edit_version": "INTEGER NOT NULL DEFAULT 0",
         "owner_id": "TEXT",
         "create_request_id": "TEXT",
         "capture_request_id": "TEXT",
@@ -389,6 +392,8 @@ def database_error(error):
 
 
 def deadline_for(reg):
+    if "expires_at" in reg.keys() and reg["expires_at"]:
+        return datetime.fromisoformat(reg["expires_at"])
     duration = (
         timedelta(hours=SEPA_HOLD_HOURS)
         if reg["payment_method"] == "sepa"
@@ -500,17 +505,11 @@ def cancel_registration_locked(db, reg):
 
 def release_stale_holds(db):
     with write_transaction(db):
-        expired = db.execute(
-            "SELECT * FROM registrations WHERE status='pending' AND ("
-            "(payment_method='sepa' AND created_at < ?) OR "
-            "(payment_method!='sepa' AND created_at < ?))",
-            (
-                (utcnow() - timedelta(hours=SEPA_HOLD_HOURS)).isoformat(),
-                (utcnow() - timedelta(minutes=HOLD_MINUTES)).isoformat(),
-            ),
-        ).fetchall()
-        for reg in expired:
-            cancel_registration_locked(db, reg)
+        now = utcnow()
+        pending = db.execute("SELECT * FROM registrations WHERE status='pending'").fetchall()
+        for reg in pending:
+            if deadline_for(reg) <= now:
+                cancel_registration_locked(db, reg)
 
 
 # ---------------------------------------------------------------------------
@@ -678,8 +677,8 @@ def get_email_template(db, kind):
     return subject, body
 
 
-def queue_email(db, kind, reg):
-    """Insert the rendered message in the same transaction as its business event."""
+def render_registration_email(db, kind, reg):
+    """Render current templates with the registration's current details."""
     table = db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
     subject, body = get_email_template(db, kind)
     values = dict(
@@ -690,6 +689,12 @@ def queue_email(db, kind, reg):
         referenz=reg["payment_reference"] or "",
         frist=display_deadline(reg),
     )
+    return render_email_template(subject, **values), render_email_template(body, **values)
+
+
+def queue_email(db, kind, reg):
+    """Insert the rendered message in the same transaction as its business event."""
+    subject, body = render_registration_email(db, kind, reg)
     db.execute(
         "INSERT INTO email_outbox (registration_id, kind, recipient, subject, body) "
         "VALUES (?, ?, ?, ?, ?) ON CONFLICT(registration_id,kind) DO NOTHING",
@@ -697,8 +702,8 @@ def queue_email(db, kind, reg):
             reg["id"],
             kind,
             reg["email"],
-            render_email_template(subject, **values),
-            render_email_template(body, **values),
+            subject,
+            body,
         ),
     )
 
@@ -837,20 +842,18 @@ def finalize_paid_registration(db, registration_id, captures=None):
 
 
 def send_sepa_reminders(db):
-    if SEPA_HOLD_HOURS <= 24:
-        return
     now = utcnow()
     with write_transaction(db):
         candidates = db.execute(
             "SELECT * FROM registrations WHERE status='pending' AND payment_method='sepa' "
-            "AND reminder_sent=0 AND created_at<? AND created_at>?",
-            (
-                (now - timedelta(hours=SEPA_HOLD_HOURS - 24)).isoformat(),
-                (now - timedelta(hours=SEPA_HOLD_HOURS)).isoformat(),
-            ),
+            "AND reminder_sent=0"
         ).fetchall()
         for reg in candidates:
-            queue_email(db, "reminder", reg)
+            deadline = deadline_for(reg)
+            if timedelta(0) < deadline - now <= timedelta(
+                hours=24
+            ) and deadline - datetime.fromisoformat(reg["created_at"]) > timedelta(hours=24):
+                queue_email(db, "reminder", reg)
 
 
 def _background_loop():
@@ -1107,6 +1110,17 @@ def api_create_order():
             return jsonify(error="Diese Registrierung kann nicht mehr bezahlt werden."), 409
         if reg["paypal_order_id"]:
             return jsonify(order_id=reg["paypal_order_id"])
+        # Extended holds can outlive PayPal's idempotency retention. Do not
+        # blindly retry an unresolved creation after the safe retry window.
+        if reg["create_attempted_at"] and utcnow() - datetime.fromisoformat(
+            reg["create_attempted_at"]
+        ) >= timedelta(hours=5):
+            db.execute("UPDATE registrations SET payment_review=1 WHERE id=?", (registration_id,))
+            return booking_response("payment_review")
+        db.execute(
+            "UPDATE registrations SET create_attempted_at=COALESCE(create_attempted_at, ?) WHERE id=?",
+            (utcnow().isoformat(), registration_id),
+        )
         # Persist one key before network I/O so retries and workers use the same operation.
         if not reg["create_request_id"]:
             db.execute(
@@ -1292,6 +1306,167 @@ def admin_dashboard():
         failed_emails=db.execute(
             "SELECT COUNT(*) FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL AND last_error IS NOT NULL"
         ).fetchone()[0],
+    )
+
+
+def refresh_pending_emails(db, reg):
+    """Re-render unsent jobs only after an explicit admin booking edit."""
+    rows = db.execute(
+        "SELECT * FROM email_outbox WHERE registration_id=? "
+        "AND sent_at IS NULL AND cancelled_at IS NULL",
+        (reg["id"],),
+    ).fetchall()
+    for row in rows:
+        # A postponed reminder must become eligible again at the new deadline.
+        if row["kind"] == "reminder" and deadline_for(reg) - utcnow() > timedelta(hours=24):
+            db.execute("DELETE FROM email_outbox WHERE id=?", (row["id"],))
+            continue
+        subject, body = render_registration_email(db, row["kind"], reg)
+        db.execute(
+            "UPDATE email_outbox SET recipient=?, subject=?, body=?, next_attempt_at=0, "
+            "last_error=NULL WHERE id=?",
+            (reg["email"], subject, body, row["id"]),
+        )
+
+
+@app.route("/admin/registrations/<int:registration_id>/edit", methods=["GET", "POST"])
+@login_required
+def admin_edit_registration(registration_id):
+    db = get_db()
+    release_stale_holds(db)
+    error = None
+    status = 200
+    if request.method == "POST":
+        try:
+            with write_transaction(db):
+                reg = db.execute(
+                    "SELECT * FROM registrations WHERE id=?", (registration_id,)
+                ).fetchone()
+                if reg is None:
+                    raise BadRequest("Registrierung nicht gefunden.")
+                version = request.form.get("version", "")
+                if (
+                    len(version) > 10
+                    or not version.isdecimal()
+                    or int(version) != reg["edit_version"]
+                ):
+                    raise BadRequest(
+                        "Die Buchung wurde inzwischen bearbeitet. Bitte prüfe die aktuellen Daten und wiederhole die Änderung."
+                    )
+                busy = db.execute(
+                    "SELECT 1 FROM email_outbox WHERE registration_id=? AND sent_at IS NULL "
+                    "AND cancelled_at IS NULL AND lease_token IS NOT NULL LIMIT 1",
+                    (registration_id,),
+                ).fetchone()
+                if busy:
+                    raise BadRequest(
+                        "Eine E-Mail wird gerade verarbeitet. Bitte versuche die Änderung gleich erneut."
+                    )
+                action = request.form.get("action")
+                if action == "contact":
+                    name = text_field(request.form, "name", 200, required=True)
+                    email = text_field(request.form, "email", 254, required=True)
+                    phone = text_field(request.form, "phone", 50)
+                    if not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", email):
+                        raise BadRequest("Bitte gib eine gültige E-Mail-Adresse an.")
+                    db.execute(
+                        "UPDATE registrations SET name=?, email=?, phone=? WHERE id=?",
+                        (name, email, phone, registration_id),
+                    )
+                elif action in ("extend", "move"):
+                    table = db.execute(
+                        "SELECT * FROM tables WHERE id=?", (reg["table_id"],)
+                    ).fetchone()
+                    if reg["status"] == "pending" and deadline_for(reg) <= utcnow():
+                        raise BadRequest("Die Reservierungsfrist ist bereits abgelaufen.")
+                    expected = "held" if reg["status"] == "pending" else "booked"
+                    if (
+                        reg["status"] not in ("pending", "paid")
+                        or table is None
+                        or table["registration_id"] != registration_id
+                        or table["status"] != expected
+                    ):
+                        raise BadRequest(
+                            "Diese Buchung hat keinen aktiven Tisch mehr. Sie kann nicht verlängert oder umgebucht werden."
+                        )
+                    if action == "extend":
+                        hours = request.form.get("hours", "")
+                        if reg["status"] != "pending":
+                            raise BadRequest("Nur offene Reservierungen können verlängert werden.")
+                        if len(hours) > 3 or not hours.isdecimal() or not 1 <= int(hours) <= 720:
+                            raise BadRequest(
+                                "Bitte eine Verlängerung zwischen 1 und 720 Stunden angeben."
+                            )
+                        db.execute(
+                            "UPDATE registrations SET expires_at=? WHERE id=?",
+                            (
+                                (deadline_for(reg) + timedelta(hours=int(hours))).isoformat(),
+                                registration_id,
+                            ),
+                        )
+                    else:
+                        number = request.form.get("table", "")
+                        if (
+                            len(number) > 10
+                            or not number.isdecimal()
+                            or not 1 <= int(number) <= 2147483647
+                        ):
+                            raise BadRequest("Bitte einen gültigen Zieltisch auswählen.")
+                        target = db.execute(
+                            "SELECT * FROM tables WHERE number=?", (int(number),)
+                        ).fetchone()
+                        if target is None or target["status"] != "free":
+                            raise BadRequest(
+                                "Der Zieltisch ist nicht mehr frei. Bitte wähle einen anderen Tisch."
+                            )
+                        db.execute(
+                            "UPDATE tables SET status=?, held_at=?, registration_id=? WHERE id=? AND status='free'",
+                            (expected, table["held_at"], registration_id, target["id"]),
+                        )
+                        db.execute(
+                            "UPDATE tables SET status='free', held_at=NULL, registration_id=NULL WHERE id=? AND registration_id=?",
+                            (table["id"], registration_id),
+                        )
+                        # Preserve the reference already communicated for bank transfers.
+                        db.execute(
+                            "UPDATE registrations SET table_id=? WHERE id=?",
+                            (target["id"], registration_id),
+                        )
+                else:
+                    raise BadRequest("Unbekannte Aktion.")
+                db.execute(
+                    "UPDATE registrations SET edit_version=edit_version+1 WHERE id=?",
+                    (registration_id,),
+                )
+                updated = db.execute(
+                    "SELECT * FROM registrations WHERE id=?", (registration_id,)
+                ).fetchone()
+                refresh_pending_emails(db, updated)
+            flash(
+                "Änderung gespeichert. Noch nicht versendete E-Mails wurden aktualisiert. Bitte informiere den Teilnehmer bei Bedarf über die Änderung."
+            )
+            return redirect(url_for("admin_edit_registration", registration_id=registration_id))
+        except BadRequest as exc:
+            error, status = exc.description, 400
+    reg = db.execute(
+        "SELECT r.*, t.number AS table_number FROM registrations r "
+        "JOIN tables t ON t.id=r.table_id WHERE r.id=?",
+        (registration_id,),
+    ).fetchone()
+    if reg is None:
+        return "Registrierung nicht gefunden.", 404
+    return (
+        render_template(
+            "admin_registration_edit.html",
+            reg=reg,
+            error=error,
+            deadline=display_deadline(reg),
+            currency=CURRENCY,
+            free_tables=db.execute(
+                "SELECT number FROM tables WHERE status='free' ORDER BY number"
+            ).fetchall(),
+        ),
+        status,
     )
 
 

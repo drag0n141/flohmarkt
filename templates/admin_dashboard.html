@@ -88,6 +88,7 @@
               </td>
               <td>{{ r.created_at[:16].replace("T", " ") }}</td>
               <td class="row-actions">
+                <a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
                 {% if r.payment_method == 'sepa' and r.status != 'paid' and not r.payment_received_at %}
                 <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
                       onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
