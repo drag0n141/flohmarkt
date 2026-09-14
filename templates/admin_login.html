@@ -9,11 +9,7 @@
 <body>
   <div class="wrap narrow">
     <h1>Admin-Login</h1>
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <p class="error">{{ messages[0] }}</p>
-      {% endif %}
-    {% endwith %}
+    {% include "_flashes.html" %}
     <div class="card">
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
