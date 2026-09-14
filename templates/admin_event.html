@@ -131,7 +131,7 @@
               <td>{{ a.created_at[:10] }} – {{ a.archived_at[:10] }}</td>
               <td>{{ a.registrations }}</td>
               <td class="row-actions">
-                <a href="{{ url_for('admin_event_detail', event_id=a.id) }}">Ansehen</a>
+                <a class="btn secondary small" href="{{ url_for('admin_event_detail', event_id=a.id) }}">Ansehen</a>
                 <form method="post"
                       onsubmit="return confirm('Archiv „{{ a.name }}“ mit allen Anmeldungen unwiderruflich löschen?');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
