@@ -524,6 +524,21 @@ def login_required(view):
     return wrapped
 
 
+# Admin pages render a flashed message as a success notice by default; errors
+# have to say so explicitly, otherwise a rejection looks like a confirmation.
+def flash_error(message):
+    flash(message, "error")
+
+
+# The database keeps the English status values; the interface is German.
+STATUS_LABELS = {"pending": "offen", "paid": "bezahlt", "cancelled": "storniert"}
+
+
+@app.template_filter("status_label")
+def status_label(status):
+    return STATUS_LABELS.get(status, status)
+
+
 def cancel_registration_locked(db, reg):
     """Release only this registration's table and voucher under the write lock."""
     if reg["status"] == "cancelled":
@@ -1293,7 +1308,7 @@ def admin_login():
             session.permanent = True
             session["is_admin"] = True
             return redirect(url_for("admin_dashboard"))
-        flash("Falsches Passwort.")
+        flash_error("Falsches Passwort.")
     return render_template("admin_login.html")
 
 
@@ -1508,7 +1523,7 @@ def admin_edit_registration(registration_id):
     if reg is None:
         return "Registrierung nicht gefunden.", 404
     if reg["event_id"] != active_event_id(db):
-        flash(ARCHIVED_REGISTRATION_MESSAGE)
+        flash_error(ARCHIVED_REGISTRATION_MESSAGE)
         return redirect(url_for("admin_event_detail", event_id=reg["event_id"]))
     return (
         render_template(
@@ -1532,11 +1547,11 @@ def admin_cancel(registration_id):
     with write_transaction(db):
         reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
         if reg is not None and reg["event_id"] != active_event_id(db):
-            flash(ARCHIVED_REGISTRATION_MESSAGE)
+            flash_error(ARCHIVED_REGISTRATION_MESSAGE)
         elif reg and cancel_registration_locked(db, reg):
             flash("Tisch wurde freigegeben. Bereits eingegangene Zahlungen bitte separat klären.")
         else:
-            flash("Diese Registrierung ist bereits storniert oder existiert nicht.")
+            flash_error("Diese Registrierung ist bereits storniert oder existiert nicht.")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -1546,15 +1561,15 @@ def admin_confirm_sepa(registration_id):
     db = get_db()
     reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
     if reg is None or reg["payment_method"] != "sepa":
-        flash("Überweisungsregistrierung nicht gefunden.")
+        flash_error("Überweisungsregistrierung nicht gefunden.")
     elif reg["event_id"] != active_event_id(db):
-        flash(ARCHIVED_REGISTRATION_MESSAGE)
+        flash_error(ARCHIVED_REGISTRATION_MESSAGE)
     else:
         outcome = finalize_paid_registration(db, registration_id)
         if outcome in ("booked", "already_booked"):
             flash("Zahlung bestätigt – der Tisch ist gebucht.")
         else:
-            flash(
+            flash_error(
                 "Zahlung erfasst, aber kein Tisch zugeordnet. Bitte Zuordnung oder Erstattung klären."
             )
     return redirect(url_for("admin_dashboard"))
@@ -1584,7 +1599,7 @@ def admin_vouchers():
             except ValueError:
                 max_uses = 1
             if not code:
-                flash("Bitte einen Code angeben.")
+                flash_error("Bitte einen Code angeben.")
             else:
                 try:
                     db.execute(
@@ -1595,7 +1610,7 @@ def admin_vouchers():
                     db.commit()
                     flash(f"Gutscheincode „{code}“ wurde angelegt.")
                 except sqlite3.IntegrityError:
-                    flash("Dieser Code existiert bereits.")
+                    flash_error("Dieser Code existiert bereits.")
 
         elif action == "bulk_generate":
             try:
@@ -1619,7 +1634,7 @@ def admin_vouchers():
                         # Extremely unlikely code collision – try again with a new one.
                         continue
                 else:
-                    flash(
+                    flash_error(
                         "Ein Code konnte nach mehreren Versuchen nicht eindeutig generiert werden – bitte erneut versuchen."
                     )
             db.commit()
@@ -1663,7 +1678,7 @@ def admin_emails():
                 set_setting(db, f"email_{kind}_body", body)
                 flash("E-Mail-Text wurde gespeichert.")
             else:
-                flash(
+                flash_error(
                     "Betreff und Text dürfen nicht leer sein; der Betreff darf keine Zeilenumbrüche enthalten."
                 )
         return redirect(url_for("admin_emails"))
@@ -1692,7 +1707,7 @@ def admin_page():
         title = (request.form.get("title") or "").strip()
         info = (request.form.get("info") or "").strip()
         if not title:
-            flash("Der Titel darf nicht leer sein.")
+            flash_error("Der Titel darf nicht leer sein.")
         else:
             set_setting(db, "event_title", title)
             set_setting(db, "event_info", info)
@@ -1720,7 +1735,7 @@ def admin_faq():
             question = (request.form.get("question") or "").strip()
             answer = (request.form.get("answer") or "").strip()
             if not question or not answer:
-                flash("Frage und Antwort dürfen nicht leer sein.")
+                flash_error("Frage und Antwort dürfen nicht leer sein.")
             else:
                 db.execute(
                     "INSERT INTO faq (question, answer, created_at) VALUES (?, ?, ?)",
@@ -1734,7 +1749,7 @@ def admin_faq():
             question = (request.form.get("question") or "").strip()
             answer = (request.form.get("answer") or "").strip()
             if not question or not answer:
-                flash("Frage und Antwort dürfen nicht leer sein.")
+                flash_error("Frage und Antwort dürfen nicht leer sein.")
             else:
                 db.execute(
                     "UPDATE faq SET question=?, answer=? WHERE id=?",
@@ -1877,7 +1892,7 @@ def admin_event():
         if action == "rename":
             name = (request.form.get("name") or "").strip()
             if not name or len(name) > 120:
-                flash("Bitte einen Namen mit höchstens 120 Zeichen angeben.")
+                flash_error("Bitte einen Namen mit höchstens 120 Zeichen angeben.")
             else:
                 db.execute("UPDATE events SET name=? WHERE id=?", (name, active_event_id(db)))
                 db.commit()
@@ -1888,9 +1903,9 @@ def admin_event():
             new_name = (request.form.get("new_name") or "").strip() or DEFAULT_EVENT_NAME
             keep = {value for value in request.form.getlist("keep") if value in CARRY_OVER_OPTIONS}
             if request.form.get("confirm") != "yes":
-                flash("Bitte bestätige das Archivieren mit dem Häkchen.")
+                flash_error("Bitte bestätige das Archivieren mit dem Häkchen.")
             elif not archive_name or len(archive_name) > 120 or len(new_name) > 120:
-                flash("Bitte Namen mit höchstens 120 Zeichen angeben.")
+                flash_error("Bitte Namen mit höchstens 120 Zeichen angeben.")
             else:
                 archive_event(db, archive_name, new_name, keep)
                 flash(
@@ -1904,7 +1919,7 @@ def admin_event():
                 "SELECT * FROM events WHERE id=? AND archived_at IS NOT NULL", (event_id,)
             ).fetchone()
             if event is None:
-                flash("Nur bereits archivierte Flohmärkte können gelöscht werden.")
+                flash_error("Nur bereits archivierte Flohmärkte können gelöscht werden.")
             else:
                 snapshot = json.loads(event["snapshot"]) if event["snapshot"] else {}
                 with write_transaction(db):
@@ -1996,7 +2011,7 @@ def admin_floorplan():
         if file and file.filename and allowed_file(file.filename):
             file_bytes = file.read()
             if not is_valid_image(file_bytes):
-                flash("Die Datei ist kein gültiges Bild.")
+                flash_error("Die Datei ist kein gültiges Bild.")
                 return redirect(url_for("admin_floorplan"))
 
             old_image = get_setting(db, "floorplan_image")
@@ -2011,7 +2026,7 @@ def admin_floorplan():
             set_setting(db, "floorplan_image", filename)
             flash("Lageplan wurde hochgeladen.")
         else:
-            flash("Bitte eine gültige Bilddatei auswählen (png, jpg, jpeg, webp).")
+            flash_error("Bitte eine gültige Bilddatei auswählen (png, jpg, jpeg, webp).")
         return redirect(url_for("admin_floorplan"))
 
     image = get_setting(db, "floorplan_image")
