@@ -1,7 +1,9 @@
 import hmac
 import io
+import json
 import os
 import re
+import shutil
 import ssl
 import uuid
 from contextlib import contextmanager
@@ -146,6 +148,13 @@ def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# Name of the very first event and of a new one started without an explicit name.
+DEFAULT_EVENT_NAME = "Aktueller Flohmarkt"
+ARCHIVED_REGISTRATION_MESSAGE = (
+    "Diese Anmeldung gehört zu einem archivierten Flohmarkt und kann nicht mehr geändert werden."
+)
+
+
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
@@ -246,6 +255,7 @@ def init_db():
         "payment_reference": "TEXT",
         "payment_received_at": "TEXT",
         "payment_review": "INTEGER NOT NULL DEFAULT 0",
+        "event_id": "INTEGER",
     }
     for column, definition in additions.items():
         if column not in reg_cols:
@@ -286,6 +296,28 @@ def init_db():
     db.execute(
         "CREATE INDEX IF NOT EXISTS registrations_paypal_order ON registrations(paypal_order_id)"
     )
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            archived_at TEXT,
+            snapshot TEXT  -- JSON copy of the content this event was run with
+        )
+    """)
+    # Exactly one event is active at a time; everything booked belongs to it.
+    # Older databases get that event retroactively so existing registrations
+    # stay visible instead of disappearing behind the archive filter.
+    active_event_row = db.execute("SELECT id FROM events WHERE archived_at IS NULL").fetchone()
+    if active_event_row is None:
+        oldest = db.execute("SELECT MIN(created_at) FROM registrations").fetchone()[0]
+        db.execute(
+            "INSERT INTO events (name, created_at) VALUES (?, ?)",
+            (DEFAULT_EVENT_NAME, oldest or utcnow().isoformat()),
+        )
+        active_event_row = db.execute("SELECT id FROM events WHERE archived_at IS NULL").fetchone()
+    db.execute("UPDATE registrations SET event_id=? WHERE event_id IS NULL", (active_event_row[0],))
+    db.execute("CREATE INDEX IF NOT EXISTS registrations_event ON registrations(event_id)")
 
     # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
     # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
@@ -337,6 +369,18 @@ def set_setting(db, key, value):
         (key, value),
     )
     db.commit()
+
+
+def active_event(db):
+    """The event new bookings belong to. Archived events are read-only history."""
+    return db.execute(
+        "SELECT * FROM events WHERE archived_at IS NULL ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+
+def active_event_id(db):
+    row = active_event(db)
+    return row["id"] if row else None
 
 
 @contextmanager
@@ -974,8 +1018,8 @@ def api_register():
         now = utcnow().isoformat()
         cur = db.execute(
             "INSERT INTO registrations (name, email, phone, table_id, status, created_at, price, "
-            "voucher_code, payment_method, owner_id, create_request_id, capture_request_id) "
-            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+            "voucher_code, payment_method, owner_id, create_request_id, capture_request_id, event_id) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 email,
@@ -988,6 +1032,7 @@ def api_register():
                 owner,
                 str(uuid.uuid4()),
                 str(uuid.uuid4()),
+                active_event_id(db),
             ),
         )
         registration_id = cur.lastrowid
@@ -1272,14 +1317,18 @@ def admin_dashboard():
         else "(r.status != 'cancelled' OR r.payment_review=1)"
     )
 
-    rows = db.execute(f"""
+    event = active_event(db)
+    rows = db.execute(
+        f"""
         SELECT r.id, r.name, r.email, r.phone, r.status, r.created_at, r.price, r.voucher_code,
                r.payment_method, r.payment_reference, r.payment_received_at, r.payment_review, t.number AS table_number
         FROM registrations r
         JOIN tables t ON t.id = r.table_id
-        WHERE {status_filter}
+        WHERE {status_filter} AND r.event_id = ?
         ORDER BY t.number
-        """).fetchall()
+        """,
+        (event["id"],),
+    ).fetchall()
     stats = db.execute("SELECT status, COUNT(*) AS n FROM tables GROUP BY status").fetchall()
     stats = {r["status"]: r["n"] for r in stats}
 
@@ -1300,6 +1349,7 @@ def admin_dashboard():
         floorplan_image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         plan_tables=plan_tables,
         view=view,
+        event=event,
         pending_emails=db.execute(
             "SELECT COUNT(*) FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL"
         ).fetchone()[0],
@@ -1344,6 +1394,8 @@ def admin_edit_registration(registration_id):
                 ).fetchone()
                 if reg is None:
                     raise BadRequest("Registrierung nicht gefunden.")
+                if reg["event_id"] != active_event_id(db):
+                    raise BadRequest(ARCHIVED_REGISTRATION_MESSAGE)
                 version = request.form.get("version", "")
                 if (
                     len(version) > 10
@@ -1455,6 +1507,9 @@ def admin_edit_registration(registration_id):
     ).fetchone()
     if reg is None:
         return "Registrierung nicht gefunden.", 404
+    if reg["event_id"] != active_event_id(db):
+        flash(ARCHIVED_REGISTRATION_MESSAGE)
+        return redirect(url_for("admin_event_detail", event_id=reg["event_id"]))
     return (
         render_template(
             "admin_registration_edit.html",
@@ -1476,7 +1531,9 @@ def admin_cancel(registration_id):
     db = get_db()
     with write_transaction(db):
         reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
-        if reg and cancel_registration_locked(db, reg):
+        if reg is not None and reg["event_id"] != active_event_id(db):
+            flash(ARCHIVED_REGISTRATION_MESSAGE)
+        elif reg and cancel_registration_locked(db, reg):
             flash("Tisch wurde freigegeben. Bereits eingegangene Zahlungen bitte separat klären.")
         else:
             flash("Diese Registrierung ist bereits storniert oder existiert nicht.")
@@ -1490,6 +1547,8 @@ def admin_confirm_sepa(registration_id):
     reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
     if reg is None or reg["payment_method"] != "sepa":
         flash("Überweisungsregistrierung nicht gefunden.")
+    elif reg["event_id"] != active_event_id(db):
+        flash(ARCHIVED_REGISTRATION_MESSAGE)
     else:
         outcome = finalize_paid_registration(db, registration_id)
         if outcome in ("booked", "already_booked"):
@@ -1694,6 +1753,237 @@ def admin_faq():
 
     faq_items = db.execute("SELECT id, question, answer FROM faq ORDER BY id").fetchall()
     return render_template("admin_faq.html", faq_items=faq_items)
+
+
+# ---------------------------------------------------------------------------
+# Archiving an event and starting the next one
+# ---------------------------------------------------------------------------
+# What the admin can carry over into the new event. Everything not listed here
+# is always reset, because it belongs to the event that just ended.
+CARRY_OVER_OPTIONS = ("floorplan", "positions", "page", "faq", "emails", "vouchers")
+
+ARCHIVED_IMAGE_PATTERN = re.compile(r"floorplan-event\d+\.[a-z0-9]{1,5}")
+
+
+def archived_image_url(filename):
+    """Only serve names this application generated when archiving."""
+    if not filename or not ARCHIVED_IMAGE_PATTERN.fullmatch(filename):
+        return None
+    return url_for("static", filename=f"uploads/{filename}")
+
+
+def build_event_snapshot(db, event_id, floorplan_image):
+    """Freeze the content an event was run with, so the archive stays readable
+    after the next event has replaced plan, texts and FAQ."""
+    totals = db.execute(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END), 0) AS paid, "
+        "COALESCE(SUM(CASE WHEN status='paid' THEN price ELSE 0 END), 0) AS revenue "
+        "FROM registrations WHERE event_id=?",
+        (event_id,),
+    ).fetchone()
+    plan_tables = db.execute(
+        "SELECT number, pos_x, pos_y FROM tables "
+        "WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL ORDER BY number"
+    ).fetchall()
+    faq_items = db.execute("SELECT question, answer FROM faq ORDER BY id").fetchall()
+    return {
+        "event_title": get_setting(db, "event_title", DEFAULT_EVENT_TITLE),
+        "event_info": get_setting(db, "event_info", DEFAULT_EVENT_INFO),
+        "floorplan_image": floorplan_image,
+        "num_tables": NUM_TABLES,
+        "currency": CURRENCY,
+        "tables": [dict(row) for row in plan_tables],
+        "faq": [dict(row) for row in faq_items],
+        "stats": {
+            "registrations": totals["total"],
+            "paid": totals["paid"],
+            "revenue": round(totals["revenue"] or 0, 2),
+        },
+    }
+
+
+def archive_event(db, archive_name, new_name, keep):
+    """Close the active event and open an empty one. Only the entries in `keep`
+    survive; all tables become free again in either case."""
+    event = active_event(db)
+    now = utcnow().isoformat()
+
+    # Copy the plan image out of the way first: the archive keeps its own copy,
+    # so a later upload for the new event cannot overwrite the old plan.
+    current_image = get_setting(db, "floorplan_image")
+    archived_image = None
+    if current_image:
+        source = os.path.join(UPLOAD_FOLDER, current_image)
+        candidate = f"floorplan-event{event['id']}.{current_image.rsplit('.', 1)[-1].lower()}"
+        if os.path.exists(source) and ARCHIVED_IMAGE_PATTERN.fullmatch(candidate):
+            shutil.copyfile(source, os.path.join(UPLOAD_FOLDER, candidate))
+            archived_image = candidate
+
+    with write_transaction(db):
+        # Nothing may stay reserved or trigger a reminder for a finished event.
+        pending = db.execute(
+            "SELECT * FROM registrations WHERE status='pending' AND event_id=?",
+            (event["id"],),
+        ).fetchall()
+        for reg in pending:
+            cancel_registration_locked(db, reg)
+        db.execute(
+            "UPDATE email_outbox SET cancelled_at=? WHERE sent_at IS NULL AND cancelled_at IS NULL "
+            "AND registration_id IN (SELECT id FROM registrations WHERE event_id=?)",
+            (now, event["id"]),
+        )
+
+        snapshot = build_event_snapshot(db, event["id"], archived_image)
+        db.execute(
+            "UPDATE events SET name=?, archived_at=?, snapshot=? WHERE id=? AND archived_at IS NULL",
+            (archive_name, now, json.dumps(snapshot, ensure_ascii=False), event["id"]),
+        )
+
+        db.execute("UPDATE tables SET status='free', held_at=NULL, registration_id=NULL")
+        if "positions" not in keep:
+            db.execute("UPDATE tables SET pos_x=NULL, pos_y=NULL")
+        if "floorplan" not in keep:
+            db.execute("DELETE FROM settings WHERE key='floorplan_image'")
+        if "page" not in keep:
+            db.execute("DELETE FROM settings WHERE key IN ('event_title', 'event_info')")
+        if "emails" not in keep:
+            db.execute("DELETE FROM settings WHERE key LIKE 'email\\_%' ESCAPE '\\'")
+        if "faq" not in keep:
+            db.execute("DELETE FROM faq")
+        if "vouchers" in keep:
+            # Codes stay valid for the new event, their redemptions start over.
+            db.execute("UPDATE vouchers SET used_count=0")
+        else:
+            db.execute("DELETE FROM vouchers")
+
+        db.execute("INSERT INTO events (name, created_at) VALUES (?, ?)", (new_name, now))
+
+    if "floorplan" not in keep and current_image:
+        old_path = os.path.join(UPLOAD_FOLDER, current_image)
+        if os.path.exists(old_path):
+            os.remove(old_path)
+    return event
+
+
+@app.route("/admin/event", methods=["GET", "POST"])
+@login_required
+def admin_event():
+    db = get_db()
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "rename":
+            name = (request.form.get("name") or "").strip()
+            if not name or len(name) > 120:
+                flash("Bitte einen Namen mit höchstens 120 Zeichen angeben.")
+            else:
+                db.execute("UPDATE events SET name=? WHERE id=?", (name, active_event_id(db)))
+                db.commit()
+                flash("Name wurde gespeichert.")
+
+        elif action == "archive":
+            archive_name = (request.form.get("archive_name") or "").strip()
+            new_name = (request.form.get("new_name") or "").strip() or DEFAULT_EVENT_NAME
+            keep = {value for value in request.form.getlist("keep") if value in CARRY_OVER_OPTIONS}
+            if request.form.get("confirm") != "yes":
+                flash("Bitte bestätige das Archivieren mit dem Häkchen.")
+            elif not archive_name or len(archive_name) > 120 or len(new_name) > 120:
+                flash("Bitte Namen mit höchstens 120 Zeichen angeben.")
+            else:
+                archive_event(db, archive_name, new_name, keep)
+                flash(
+                    f"„{archive_name}“ wurde archiviert. „{new_name}“ ist gestartet – "
+                    "alle Tische sind wieder frei."
+                )
+
+        elif action == "delete":
+            event_id = request.form.get("event_id")
+            event = db.execute(
+                "SELECT * FROM events WHERE id=? AND archived_at IS NOT NULL", (event_id,)
+            ).fetchone()
+            if event is None:
+                flash("Nur bereits archivierte Flohmärkte können gelöscht werden.")
+            else:
+                snapshot = json.loads(event["snapshot"]) if event["snapshot"] else {}
+                with write_transaction(db):
+                    db.execute(
+                        "DELETE FROM email_outbox WHERE registration_id IN "
+                        "(SELECT id FROM registrations WHERE event_id=?)",
+                        (event["id"],),
+                    )
+                    db.execute(
+                        "DELETE FROM payment_receipts WHERE registration_id IN "
+                        "(SELECT id FROM registrations WHERE event_id=?)",
+                        (event["id"],),
+                    )
+                    db.execute("DELETE FROM registrations WHERE event_id=?", (event["id"],))
+                    db.execute("DELETE FROM events WHERE id=?", (event["id"],))
+                image = snapshot.get("floorplan_image")
+                if image and ARCHIVED_IMAGE_PATTERN.fullmatch(image):
+                    path = os.path.join(UPLOAD_FOLDER, image)
+                    if os.path.exists(path):
+                        os.remove(path)
+                flash(f"Das Archiv „{event['name']}“ wurde gelöscht.")
+
+        return redirect(url_for("admin_event"))
+
+    event = active_event(db)
+    summary = dict(
+        registrations=db.execute(
+            "SELECT COUNT(*) FROM registrations WHERE event_id=? AND status!='cancelled'",
+            (event["id"],),
+        ).fetchone()[0],
+        booked=db.execute("SELECT COUNT(*) FROM tables WHERE status='booked'").fetchone()[0],
+        held=db.execute("SELECT COUNT(*) FROM tables WHERE status='held'").fetchone()[0],
+        positions=db.execute(
+            "SELECT COUNT(*) FROM tables WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL"
+        ).fetchone()[0],
+        faq=db.execute("SELECT COUNT(*) FROM faq").fetchone()[0],
+        vouchers=db.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0],
+        floorplan=bool(get_setting(db, "floorplan_image")),
+    )
+    archived = db.execute("""
+        SELECT e.id, e.name, e.created_at, e.archived_at,
+               (SELECT COUNT(*) FROM registrations r WHERE r.event_id = e.id) AS registrations
+        FROM events e
+        WHERE e.archived_at IS NOT NULL
+        ORDER BY e.archived_at DESC
+        """).fetchall()
+    return render_template(
+        "admin_event.html",
+        event=event,
+        summary=summary,
+        archived=archived,
+        event_title=get_setting(db, "event_title", DEFAULT_EVENT_TITLE),
+    )
+
+
+@app.route("/admin/event/<int:event_id>")
+@login_required
+def admin_event_detail(event_id):
+    db = get_db()
+    event = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+    if event is None:
+        return "Flohmarkt nicht gefunden.", 404
+    if event["archived_at"] is None:
+        return redirect(url_for("admin_event"))
+
+    snapshot = json.loads(event["snapshot"]) if event["snapshot"] else {}
+    registrations = db.execute(
+        "SELECT r.*, t.number AS table_number FROM registrations r "
+        "JOIN tables t ON t.id = r.table_id WHERE r.event_id=? ORDER BY t.number",
+        (event_id,),
+    ).fetchall()
+    return render_template(
+        "admin_event_detail.html",
+        event=event,
+        snapshot=snapshot,
+        registrations=registrations,
+        currency=snapshot.get("currency", CURRENCY),
+        floorplan_image_url=archived_image_url(snapshot.get("floorplan_image")),
+    )
 
 
 @app.route("/admin/floorplan", methods=["GET", "POST"])
