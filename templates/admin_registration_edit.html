@@ -10,12 +10,12 @@
 <div class="wrap">
   <div class="admin-header">
     <h1>Buchung {{ reg.id }} bearbeiten</h1>
-    <a href="{{ url_for('admin_dashboard') }}">Zur Übersicht</a>
+    {% include "_admin_nav.html" %}
   </div>
-  {% for message in get_flashed_messages() %}<p class="notice">{{ message }}</p>{% endfor %}
+  {% include "_flashes.html" %}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <div class="card">
-    <p>Aktueller Tisch: <strong>{{ reg.table_number }}</strong> · Status: <strong>{{ reg.status }}</strong></p>
+    <p>Aktueller Tisch: <strong>{{ reg.table_number }}</strong> · Status: <strong>{{ reg.status|status_label }}</strong></p>
     <p>Zahlungsart: {{ 'Überweisung' if reg.payment_method == 'sepa' else 'PayPal' }}
       · Preis: {{ '%.2f'|format(reg.price) if reg.price is not none else '–' }} {{ currency }}</p>
     {% if reg.payment_method == 'sepa' %}
