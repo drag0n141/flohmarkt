@@ -99,6 +99,25 @@ button, .btn {
   line-height: normal;
 }
 button.secondary, .btn.secondary { background: #e5e7eb; color: #333; }
+/* Aktionen, die etwas unwiderruflich entfernen oder freigeben. */
+button.danger, .btn.danger { background: #c94b4b; color: #fff; }
+
+button:hover, .btn:hover { background: #1a5fd0; }
+button.secondary:hover, .btn.secondary:hover { background: #d3d7de; }
+button.danger:hover, .btn.danger:hover { background: #b03d3d; }
+.picker-btn:hover { border-color: #1f6feb; }
+
+/* Ein sichtbarer Fokusring ist die einzige Orientierung bei Tastaturbedienung;
+   der Browser-Standard geht auf den farbigen Buttons unter. */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #1f2430;
+  outline-offset: 2px;
+}
 .error { color: #c94b4b; margin-top: 10px; min-height: 1em; }
 
 /* Zahlungsart-Auswahl (radio buttons nebeneinander statt volle Breite) */
@@ -110,8 +129,10 @@ button.secondary, .btn.secondary { background: #e5e7eb; color: #333; }
 .admin-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
 .admin-header nav a { margin-left: 16px; color: #1f6feb; text-decoration: none; font-size: 14px; }
 .admin-header nav a:first-child { margin-left: 0; }
+.admin-header nav a.active { color: #1f2430; font-weight: 600; }
 
 .notice { background: #eaf4ea; color: #256029; padding: 10px 14px; border-radius: 6px; }
+.notice.error { background: #fdeced; color: #96272c; }
 
 .stats { display: flex; gap: 20px; margin: 16px 0; font-size: 14px; color: #333; flex-wrap: wrap; }
 
