@@ -16,6 +16,7 @@
         <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
         <a href="{{ url_for('admin_page') }}">Seiteninhalt</a>
         <a href="{{ url_for('admin_faq') }}">FAQ</a>
+        <a href="{{ url_for('admin_event') }}">Archiv</a>
         <a href="{{ url_for('admin_logout') }}">Abmelden</a>
       </nav>
     </div>
@@ -23,6 +24,9 @@
     {% with messages = get_flashed_messages() %}
       {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
     {% endwith %}
+
+    <p class="hint">Aktueller Flohmarkt: <strong>{{ event.name }}</strong> ·
+      <a href="{{ url_for('admin_event') }}">archivieren und neu starten</a></p>
 
     <div class="stats">
       <span>Tische gesamt: <strong>{{ num_tables }}</strong></span>
