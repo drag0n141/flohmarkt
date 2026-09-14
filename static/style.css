@@ -81,16 +81,24 @@ form textarea {
 }
 form textarea { resize: vertical; }
 .row { display: flex; gap: 10px; margin-top: 8px; }
-button {
+button, .btn {
   background: #1f6feb;
   color: #fff;
   border: none;
   padding: 10px 16px;
   border-radius: 6px;
   font-size: 15px;
+  font-family: inherit;
   cursor: pointer;
 }
-button.secondary { background: #e5e7eb; color: #333; }
+/* Links, die neben echten Buttons stehen (z. B. in .row-actions). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  line-height: normal;
+}
+button.secondary, .btn.secondary { background: #e5e7eb; color: #333; }
 .error { color: #c94b4b; margin-top: 10px; min-height: 1em; }
 
 /* Zahlungsart-Auswahl (radio buttons nebeneinander statt volle Breite) */
@@ -139,7 +147,7 @@ button.secondary { background: #e5e7eb; color: #333; }
 .badge.pending { background: #e0a300; }
 .badge.cancelled { background: #999; }
 
-button.small { padding: 6px 10px; font-size: 13px; }
+button.small, .btn.small { padding: 6px 10px; font-size: 13px; }
 
 .hint { color: #666; font-size: 14px; }
 
@@ -223,7 +231,7 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .inline-form { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .inline-form label { margin-bottom: 0; }
 .inline-form input { width: auto; min-width: 160px; }
-.row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
 code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
 
 .hint.success { color: #2fa84f; }
