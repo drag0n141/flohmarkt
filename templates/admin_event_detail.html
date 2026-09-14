@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archiv – {{ event.name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>{{ event.name }}</h1>
+      <nav>
+        <a href="{{ url_for('admin_event') }}">Zurück zum Archiv</a>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <p class="hint">Archiviert am {{ event.archived_at[:16].replace("T", " ") }} ·
+      Gestartet am {{ event.created_at[:16].replace("T", " ") }} ·
+      Öffentlicher Titel damals: „{{ snapshot.get('event_title', '–') }}“.
+      Dieser Flohmarkt ist abgeschlossen; Buchungen lassen sich hier nicht mehr ändern.</p>
+
+    {% if snapshot.stats %}
+    <div class="stats">
+      <span>Anmeldungen: <strong>{{ snapshot.stats.registrations }}</strong></span>
+      <span>bezahlt: <strong>{{ snapshot.stats.paid }}</strong></span>
+      <span>Einnahmen: <strong>{{ "%.2f"|format(snapshot.stats.revenue) }} {{ currency }}</strong></span>
+      <span>Tische damals: <strong>{{ snapshot.get('num_tables', '–') }}</strong></span>
+    </div>
+    {% endif %}
+
+    {% if floorplan_image_url %}
+    <div class="card">
+      <h2>Lageplan</h2>
+      <p class="hint">Der Plan und die Tischanordnung, wie sie bei diesem Flohmarkt verwendet wurden.</p>
+      <div class="plan-scroll">
+        <div class="plan-inner">
+          <img src="{{ floorplan_image_url }}" alt="Lageplan">
+          {% for t in snapshot.get('tables', []) %}
+          <div class="plan-marker" style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;">{{ t.number }}</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Anmeldungen</h2>
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Tisch</th>
+              <th>Name</th>
+              <th>E-Mail</th>
+              <th>Telefon</th>
+              <th>Preis</th>
+              <th>Zahlungsart / Referenz</th>
+              <th>Gutschein</th>
+              <th>Status</th>
+              <th>Angemeldet am</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in registrations %}
+            <tr>
+              <td>{{ r.table_number }}</td>
+              <td>{{ r.name }}</td>
+              <td>{{ r.email }}</td>
+              <td>{{ r.phone or "–" }}</td>
+              <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
+              <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}
+                {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
+              <td>{{ r.voucher_code or "–" }}</td>
+              <td><span class="badge {{ r.status }}">{{ r.status }}</span>
+                {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
+                {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
+              </td>
+              <td>{{ r.created_at[:16].replace("T", " ") }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9">Für diesen Flohmarkt gab es keine Anmeldungen.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if snapshot.get('faq') %}
+    <div class="card">
+      <h2>FAQ zu diesem Flohmarkt</h2>
+      <dl class="faq-list">
+        {% for item in snapshot.faq %}
+        <dt>{{ item.question }}</dt>
+        <dd>{{ item.answer }}</dd>
+        {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
+
+    {% if snapshot.get('event_info') %}
+    <div class="card">
+      <h2>Info-Text der öffentlichen Seite</h2>
+      <div class="event-info">{{ snapshot.event_info }}</div>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>
