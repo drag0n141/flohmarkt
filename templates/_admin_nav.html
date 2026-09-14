@@ -1,0 +1,20 @@
+{# Shared admin navigation. The entry for the page being viewed is marked
+   rather than left out, so the row keeps the same order on every page. #}
+{% set nav_active = {
+     'admin_event_detail': 'admin_event',
+     'admin_edit_registration': 'admin_dashboard',
+   }.get(request.endpoint, request.endpoint) %}
+<nav>
+  {% for endpoint, label in [
+       ('admin_dashboard', 'Tischübersicht'),
+       ('admin_vouchers', 'Gutscheincodes'),
+       ('admin_floorplan', 'Lageplan'),
+       ('admin_emails', 'E-Mail-Texte'),
+       ('admin_page', 'Seiteninhalt'),
+       ('admin_faq', 'FAQ'),
+       ('admin_event', 'Archiv'),
+     ] %}
+  <a class="{{ 'active' if endpoint == nav_active else '' }}" href="{{ url_for(endpoint) }}">{{ label }}</a>
+  {% endfor %}
+  <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+</nav>

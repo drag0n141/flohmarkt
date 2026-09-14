@@ -10,16 +10,10 @@
   <div class="wrap wide">
     <div class="admin-header">
       <h1>{{ event.name }}</h1>
-      <nav>
-        <a href="{{ url_for('admin_event') }}">Zurück zum Archiv</a>
-        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
-        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
-      </nav>
+      {% include "_admin_nav.html" %}
     </div>
 
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
-    {% endwith %}
+    {% include "_flashes.html" %}
 
     <p class="hint">Archiviert am {{ event.archived_at[:16].replace("T", " ") }} ·
       Gestartet am {{ event.created_at[:16].replace("T", " ") }} ·
@@ -78,7 +72,7 @@
               <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}
                 {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
               <td>{{ r.voucher_code or "–" }}</td>
-              <td><span class="badge {{ r.status }}">{{ r.status }}</span>
+              <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>
                 {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
                 {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
               </td>

@@ -10,20 +10,10 @@
   <div class="wrap wide">
     <div class="admin-header">
       <h1>Flohmarkt archivieren</h1>
-      <nav>
-        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
-        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
-        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
-        <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
-        <a href="{{ url_for('admin_page') }}">Seiteninhalt</a>
-        <a href="{{ url_for('admin_faq') }}">FAQ</a>
-        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
-      </nav>
+      {% include "_admin_nav.html" %}
     </div>
 
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
-    {% endwith %}
+    {% include "_flashes.html" %}
 
     <div class="card">
       <h2>Aktueller Flohmarkt</h2>
@@ -137,7 +127,7 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="event_id" value="{{ a.id }}">
-                  <button type="submit" class="secondary small">Löschen</button>
+                  <button type="submit" class="danger small">Löschen</button>
                 </form>
               </td>
             </tr>

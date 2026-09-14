@@ -1,0 +1,6 @@
+{# One place decides how a flashed message looks, so a rejection can never end
+   up in the green success box. #}
+{% for category, message in get_flashed_messages(with_categories=true) %}
+{% if category == 'error' %}<p class="notice error" role="alert">{{ message }}</p>
+{% else %}<p class="notice">{{ message }}</p>{% endif %}
+{% endfor %}
