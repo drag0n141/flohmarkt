@@ -224,3 +224,45 @@ with a lightweight DOM stub; they do not test browser rendering or the real
 PayPal SDK. Run these commands before merging or publishing an image.
 The existing image workflow does not yet run this suite automatically; adding
 the test job requires permission to edit `.github/workflows/docker-publish.yml`.
+
+
+## Admin booking management
+
+Open `/admin` and click **Bearbeiten** next to a registration. The edit page
+provides three separate forms:
+
+- **Buchungsdaten:** correct the name, email address and phone number, including
+  historical registrations. Price, payment method and voucher are not editable.
+- **Reservierungsfrist verlängern:** add 1–720 whole hours to the current deadline
+  of an active, unpaid reservation. Repeated extensions build on the last deadline;
+  the creation date is preserved. Paid, cancelled and expired reservations cannot
+  be extended or resurrected. The default hold lengths remain unchanged.
+- **Tisch wechseln:** move an active pending or paid booking to a currently free
+  table. The move and release of the old table are atomic. Payment records, price,
+  voucher and deadline stay attached to the same registration. Concurrent requests
+  for the same target table cannot both succeed.
+
+The existing `FLOHMARKT-<table number>` bank-transfer reference is preserved during
+a move because it may already have been communicated or used for a transfer.
+The edit page shows the current table and the original payment reference separately.
+New registrations continue to receive their original table-only reference.
+
+Saving an edit re-renders active, unsent emails with the current templates and
+updated booking details, including the recipient. Already sent or cancelled emails
+are not modified or resent, and no extra change-notification email is created.
+Admins must inform participants separately when needed. While an email job is
+leased to a worker, edits are refused until that job finishes or is recovered.
+Stale editor forms cannot overwrite a newer admin edit.
+
+Expiry, payment finalization and reminder scheduling all use the individual
+extended deadline. Extending a deadline beyond the reminder window removes an
+unsent reminder so it can be queued at the new deadline; an already sent reminder
+is not sent a second time. Existing PayPal orders are reused. For an unresolved
+order creation, automatic retries stop after five hours and require manual review,
+since an extended hold can outlive PayPal's idempotency retention window.
+
+Startup adds nullable `expires_at` and `create_attempted_at` fields plus an
+`edit_version` counter. Existing reservations keep their derived deadlines until
+an admin explicitly extends one. Back up the database before upgrading and stop
+old workers before starting the new version, so every worker uses the same
+individual-deadline logic.
