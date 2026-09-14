@@ -218,7 +218,8 @@ node --test tests/test_frontend.cjs
 Tests use temporary SQLite databases and mocked PayPal/SMTP calls; they never
 charge money or send email. They cover competing reservations and vouchers,
 rollback, late/repeated payments, ownership/CSRF checks, timeout reconciliation,
-email retries and concurrent leases, and upgrades from the legacy schema.
+email retries and concurrent leases, archiving and carry-over options, and
+upgrades from the legacy schema.
 The Node tests exercise frontend request construction and payment-state changes
 with a lightweight DOM stub; they do not test browser rendering or the real
 PayPal SDK. Run these commands before merging or publishing an image.
@@ -266,3 +267,51 @@ Startup adds nullable `expires_at` and `create_attempted_at` fields plus an
 an admin explicitly extends one. Back up the database before upgrading and stop
 old workers before starting the new version, so every worker uses the same
 individual-deadline logic.
+
+## Archiving an event and starting the next one
+
+Open `/admin/event` (**Archiv** in the admin navigation) to close the current
+flea market and start the next one. Registrations always belong to exactly one
+event; only the active event is shown on `/admin` and can be edited.
+
+Archiving does the following in a single transaction:
+
+1. Pending, unpaid reservations are cancelled and their vouchers released, so no
+   reminder is sent for an event that is over. Unsent emails of that event are
+   cancelled. Paid bookings keep their status and stay readable in the archive.
+2. The event is stored with a snapshot of the content it ran with: public title
+   and info text, FAQ entries, floor plan file name, table positions, and totals
+   (registrations, paid bookings, revenue). The archive therefore stays readable
+   after the next event replaces all of it.
+3. All tables become free again, and a new active event is created.
+
+A checkbox per item decides what is carried over into the new event; everything
+without a checkmark is reset:
+
+- **Lageplan** – the uploaded plan image
+- **Anordnung der Tische** – the `pos_x`/`pos_y` markers on the plan
+- **Seiteninhalt** – public page title and info text
+- **FAQ** – all question/answer pairs
+- **E-Mail-Texte** – the customized email templates
+- **Gutscheincodes** – the codes stay, their redemption counters start at zero
+  (unchecked by default, since codes are usually event-specific)
+
+Plan and positions are independent on purpose: a new plan image can reuse the
+existing table arrangement, and the existing plan can be reused with the tables
+placed differently. Registrations and table assignments are never carried over.
+
+The archive keeps its own copy of the plan image as
+`static/uploads/floorplan-event<id>.<ext>`, so uploading a new plan for the next
+event cannot overwrite the archived one. Include `static/uploads` in backups.
+
+`/admin/event/<id>` shows an archived event with its plan, table arrangement,
+registrations and FAQ. Archived registrations are read-only: editing, releasing
+a table and confirming a bank transfer are refused, and releasing an archived
+booking can never free a table that now belongs to the new event. Deleting an
+archive is possible from `/admin/event` and permanently removes that event's
+registrations, email records, payment receipts and archived plan image.
+
+Startup adds an `events` table and a nullable `registrations.event_id` column.
+Existing databases receive one active event retroactively, dated to the oldest
+registration, and all existing registrations are assigned to it, so nothing
+disappears behind the archive filter after an upgrade.

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin – Flohmarkt archivieren</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="admin-header">
+      <h1>Flohmarkt archivieren</h1>
+      <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Tischübersicht</a>
+        <a href="{{ url_for('admin_vouchers') }}">Gutscheincodes</a>
+        <a href="{{ url_for('admin_floorplan') }}">Lageplan</a>
+        <a href="{{ url_for('admin_emails') }}">E-Mail-Texte</a>
+        <a href="{{ url_for('admin_page') }}">Seiteninhalt</a>
+        <a href="{{ url_for('admin_faq') }}">FAQ</a>
+        <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+      </nav>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<p class="notice">{{ messages[0] }}</p>{% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Aktueller Flohmarkt</h2>
+      <form method="post" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="rename">
+        <label>Name<input type="text" name="name" value="{{ event.name }}" maxlength="120" required></label>
+        <button type="submit" class="secondary">Namen speichern</button>
+      </form>
+      <p class="hint">Gestartet am {{ event.created_at[:16].replace("T", " ") }}.
+        Der Name erscheint nur im Admin-Bereich und später im Archiv. Der öffentliche
+        Seitentitel lautet derzeit „{{ event_title }}“.</p>
+      <div class="stats">
+        <span>Anmeldungen: <strong>{{ summary.registrations }}</strong></span>
+        <span>vergeben: <strong>{{ summary.booked }}</strong></span>
+        <span>reserviert: <strong>{{ summary.held }}</strong></span>
+        <span>platzierte Tische: <strong>{{ summary.positions }}</strong></span>
+        <span>FAQ-Einträge: <strong>{{ summary.faq }}</strong></span>
+        <span>Gutscheincodes: <strong>{{ summary.vouchers }}</strong></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Archivieren und neuen Flohmarkt starten</h2>
+      <p class="hint">Der aktuelle Flohmarkt wird mit allen Anmeldungen ins Archiv verschoben
+        und bleibt dort einsehbar. Anschließend sind alle Tische wieder frei. Noch offene,
+        unbezahlte Reservierungen werden dabei storniert und noch nicht versendete E-Mails
+        (z. B. Zahlungserinnerungen) verworfen. Bereits erfasste Zahlungen bleiben im Archiv
+        dokumentiert – es wird nichts automatisch erstattet.</p>
+
+      <form method="post"
+            onsubmit="return confirm('Aktuellen Flohmarkt wirklich archivieren und einen neuen starten? Alle Tische werden freigegeben.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="archive">
+
+        <label>Name für das Archiv
+          <input type="text" name="archive_name" value="{{ event.name }}" maxlength="120" required>
+        </label>
+        <p class="hint">Zum Wiederfinden hilfreich, z. B. „Flohmarkt Frühjahr 2026“.</p>
+
+        <label>Name des neuen Flohmarkts
+          <input type="text" name="new_name" placeholder="Neuer Flohmarkt" maxlength="120">
+        </label>
+
+        <h3>Für den neuen Flohmarkt übernehmen</h3>
+        <p class="hint">Alles ohne Häkchen wird zurückgesetzt. Anmeldungen und
+          Tischbelegungen werden immer zurückgesetzt – sie gehören zum archivierten Flohmarkt.</p>
+        <div class="payment-choice">
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="floorplan" checked>
+            Lageplan (hochgeladenes Bild)
+          </label>
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="positions" checked>
+            Anordnung der Tische (Positionen auf dem Plan)
+          </label>
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="page" checked>
+            Seiteninhalt (Titel und Info-Text)
+          </label>
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="faq" checked>
+            FAQ-Einträge
+          </label>
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="emails" checked>
+            E-Mail-Texte
+          </label>
+          <label class="radio-inline">
+            <input type="checkbox" name="keep" value="vouchers">
+            Gutscheincodes (Einlösungen werden zurückgesetzt)
+          </label>
+        </div>
+        <p class="hint">Der Lageplan und die Tischpositionen lassen sich unabhängig voneinander
+          übernehmen: ein neues Planbild mit gleicher Tischanordnung ist damit möglich, ebenso
+          der gleiche Plan mit neu verteilten Tischen.</p>
+
+        <label class="radio-inline">
+          <input type="checkbox" name="confirm" value="yes" required>
+          Ja, aktuellen Flohmarkt archivieren und einen neuen starten
+        </label>
+
+        <div class="row">
+          <button type="submit">Archivieren und neu starten</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Archivierte Flohmärkte</h2>
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Zeitraum</th>
+              <th>Anmeldungen</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in archived %}
+            <tr>
+              <td><a href="{{ url_for('admin_event_detail', event_id=a.id) }}">{{ a.name }}</a></td>
+              <td>{{ a.created_at[:10] }} – {{ a.archived_at[:10] }}</td>
+              <td>{{ a.registrations }}</td>
+              <td class="row-actions">
+                <a href="{{ url_for('admin_event_detail', event_id=a.id) }}">Ansehen</a>
+                <form method="post"
+                      onsubmit="return confirm('Archiv „{{ a.name }}“ mit allen Anmeldungen unwiderruflich löschen?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="event_id" value="{{ a.id }}">
+                  <button type="submit" class="secondary small">Löschen</button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4">Noch kein Flohmarkt archiviert.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
