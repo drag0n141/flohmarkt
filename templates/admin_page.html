@@ -1,21 +1,9 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – Seiteninhalt</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>Seiteninhalt</h1>
-      {% include "_admin_nav.html" %}
-    </div>
+{% extends "admin_base.html" %}
+{% block title %}Admin – Seiteninhalt{% endblock %}
+{% block heading %}Seiteninhalt{% endblock %}
+{% block content %}
 
-    {% include "_flashes.html" %}
-
-    <div class="card">
+    <div class="card form-card">
       <h2>Titel &amp; Infotext der Startseite</h2>
       <p class="hint">Erscheint ganz oben auf der öffentlichen Tischvergabe-Seite, direkt über der
         Tischauswahl. Hier gehört rein, um welchen Flohmarkt es sich handelt, wann und wo er
@@ -31,9 +19,8 @@
 Samstag, 12. September 2026, 10–14 Uhr
 Turnhalle, Musterstraße 1, 12345 Musterstadt">{{ event_info }}</textarea>
         </label>
-        <button type="submit">Speichern</button>
+        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Speichern</button></div>
       </form>
     </div>
-  </div>
-</body>
-</html>
+
+{% endblock %}

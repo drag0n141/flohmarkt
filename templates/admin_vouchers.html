@@ -1,24 +1,12 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – Gutscheincodes</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>Gutscheincodes (Mitgliederrabatt)</h1>
-      {% include "_admin_nav.html" %}
-    </div>
+{% extends "admin_base.html" %}
+{% block title %}Admin – Gutscheincodes{% endblock %}
+{% block heading %}Gutscheincodes (Mitgliederrabatt){% endblock %}
+{% block content %}
 
     <p class="hint">
-      Regulärer Preis: <strong>{{ "%.2f"|format(price_standard) }} {{ currency }}</strong> ·
-      Preis mit gültigem Gutschein: <strong>{{ "%.2f"|format(price_internal) }} {{ currency }}</strong>
+      Regulärer Preis: <strong>{{ price_standard|admin_money }} {{ currency }}</strong> ·
+      Preis mit gültigem Gutschein: <strong>{{ price_internal|admin_money }} {{ currency }}</strong>
     </p>
-
-    {% include "_flashes.html" %}
 
     <div class="card">
       <h2>Einzelnen Code anlegen</h2>
@@ -68,8 +56,8 @@
                   {{ 'aktiv' if v.active else 'deaktiviert' }}
                 </span>
               </td>
-              <td>{{ v.created_at[:16].replace("T", " ") }}</td>
-              <td class="row-actions">
+              <td>{{ v.created_at|admin_datetime }}</td>
+              <td><details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
                 <form method="post">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="action" value="toggle">
@@ -84,7 +72,7 @@
                   <input type="hidden" name="voucher_id" value="{{ v.id }}">
                   <button type="submit" class="danger small">Löschen</button>
                 </form>
-              </td>
+              </div></details></td>
             </tr>
             {% else %}
             <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
@@ -93,6 +81,5 @@
         </table>
       </div>
     </div>
-  </div>
-</body>
-</html>
+
+{% endblock %}

@@ -1299,6 +1299,35 @@ def paypal_webhook():
 # ---------------------------------------------------------------------------
 # Admin area
 # ---------------------------------------------------------------------------
+@app.context_processor
+def admin_context():
+    if request.endpoint and request.endpoint.startswith("admin_") and session.get("is_admin"):
+        return {"admin_event_name": active_event(get_db())["name"]}
+    return {}
+
+
+@app.template_filter("admin_datetime")
+def admin_datetime(value):
+    if not value:
+        return "–"
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y %H:%M")
+
+
+@app.template_filter("admin_date")
+def admin_date(value):
+    return admin_datetime(value).split(" ")[0]
+
+
+@app.template_filter("admin_money")
+def admin_money(value):
+    if value is None:
+        return "–"
+    return f"{value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
 def admin_login():
@@ -1325,7 +1354,10 @@ def admin_dashboard():
     release_stale_holds(db)
 
     view = request.args.get("view")
-    view = "history" if view == "history" else "active"
+    view = view if view in ("history", "plan") else "active"
+    search = request.args.get("q", "").strip()[:200]
+    booking_filter = request.args.get("filter", "")
+    booking_filter = booking_filter if booking_filter in ("pending", "review") else ""
     status_filter = (
         "r.status = 'cancelled'"
         if view == "history"
@@ -1336,7 +1368,7 @@ def admin_dashboard():
     rows = db.execute(
         f"""
         SELECT r.id, r.name, r.email, r.phone, r.status, r.created_at, r.price, r.voucher_code,
-               r.payment_method, r.payment_reference, r.payment_received_at, r.payment_review, t.number AS table_number
+               r.payment_method, r.payment_reference, r.payment_received_at, r.payment_review, r.expires_at, t.number AS table_number
         FROM registrations r
         JOIN tables t ON t.id = r.table_id
         WHERE {status_filter} AND r.event_id = ?
@@ -1344,6 +1376,18 @@ def admin_dashboard():
         """,
         (event["id"],),
     ).fetchall()
+    if search:
+        term = search.casefold()
+        rows = [
+            r for r in rows
+            if any(term in str(r[key] or "").casefold()
+                   for key in ("name", "email", "payment_reference"))
+            or term == str(r["table_number"])
+        ]
+    if booking_filter == "pending":
+        rows = [r for r in rows if r["status"] == "pending" and not r["payment_received_at"]]
+    elif booking_filter == "review":
+        rows = [r for r in rows if r["payment_review"]]
     stats = db.execute("SELECT status, COUNT(*) AS n FROM tables GROUP BY status").fetchall()
     stats = {r["status"]: r["n"] for r in stats}
 
@@ -1358,6 +1402,9 @@ def admin_dashboard():
     return render_template(
         "admin_dashboard.html",
         registrations=rows,
+        search=search,
+        booking_filter=booking_filter,
+        display_deadline=display_deadline,
         stats=stats,
         num_tables=NUM_TABLES,
         currency=CURRENCY,

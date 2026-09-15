@@ -1,42 +1,31 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – Tischübersicht</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>Tischübersicht</h1>
-      {% include "_admin_nav.html" %}
-    </div>
-
-    {% include "_flashes.html" %}
-
-    <p class="hint">Aktueller Flohmarkt: <strong>{{ event.name }}</strong> ·
-      <a href="{{ url_for('admin_event') }}">archivieren und neu starten</a></p>
-
-    <div class="stats">
-      <span>Tische gesamt: <strong>{{ num_tables }}</strong></span>
-      <span>frei: <strong>{{ stats.get('free', 0) }}</strong></span>
-      <span>reserviert: <strong>{{ stats.get('held', 0) }}</strong></span>
-      <span>vergeben: <strong>{{ stats.get('booked', 0) }}</strong></span>
-    </div>
-
-    <p class="hint">E-Mails ausstehend: {{ pending_emails }}; davon mit Versandfehler: {{ failed_emails }}.
-      Fehlgeschlagene Zustellungen werden automatisch erneut versucht.</p>
-
+{% extends "admin_base.html" %}
+{% block title %}Admin – Buchungen{% endblock %}
+{% block heading %}Buchungen{% endblock %}
+{% block content %}
+<div class="stats stat-cards">
+{% for label, value in [('Tische gesamt', num_tables), ('Frei', stats.get('free', 0)), ('Reserviert', stats.get('held', 0)), ('Vergeben', stats.get('booked', 0))] %}
+<div><span>{{ label }}</span><strong>{{ value }}</strong></div>
+{% endfor %}
+</div>
+{% if failed_emails %}
+<p class="notice error" role="alert"><strong>{{ failed_emails }} E-Mails mit Versandfehler.</strong> Insgesamt {{ pending_emails }} ausstehend. Fehlgeschlagene Zustellungen werden automatisch erneut versucht.</p>
+{% else %}<p class="hint">E-Mail-Versand: {{ pending_emails }} ausstehend.</p>{% endif %}
+<nav class="tabs" aria-label="Ansicht">
+<a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if view == 'active' else '' }}">Aktive Buchungen</a>
+<a href="{{ url_for('admin_dashboard', view='history') }}" class="{{ 'active' if view == 'history' else '' }}">Verlauf</a>
+<a href="{{ url_for('admin_dashboard', view='plan') }}" class="{{ 'active' if view == 'plan' else '' }}">Lageplan</a>
+</nav>
+{% if view == 'plan' %}
+<p class="hint">Tischbelegung: Grün = frei · Gelb = reserviert · Rot = vergeben.</p>
     {% if floorplan_image_url %}
     <div class="card">
       <h2>Lageplan</h2>
-      <p class="hint">Auf einen Tisch klicken, um zur zugehörigen Zeile zu springen.</p>
+      <p class="hint">Auf einen Tisch klicken, um nach seiner Buchung zu suchen.</p>
       <div class="plan-scroll dashboard-plan-container">
         <div class="plan-inner">
           <img src="{{ floorplan_image_url }}" alt="Lageplan">
           {% for t in plan_tables %}
-          <a href="#table-{{ t.number }}" class="plan-table-marker {{ t.status }}"
+          <a href="{{ url_for('admin_dashboard', q=t.number) }}" class="plan-table-marker {{ t.status }}"
              style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}">{{ t.number }}</a>
           {% endfor %}
         </div>
@@ -44,75 +33,53 @@
     </div>
     {% endif %}
 
-    <div class="card">
-      <div class="tabs">
-        <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if view == 'active' else '' }}">Aktiv</a>
-        <a href="{{ url_for('admin_dashboard', view='history') }}" class="{{ 'active' if view == 'history' else '' }}">Verlauf (abgelaufen/storniert)</a>
-      </div>
-      <div class="table-scroll">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Tisch</th>
-              <th>Name</th>
-              <th>E-Mail</th>
-              <th>Telefon</th>
-              <th>Preis</th>
-              <th>Zahlungsart / Referenz</th>
-              <th>Gutschein</th>
-              <th>Status</th>
-              <th>Angemeldet am</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in registrations %}
-            <tr id="table-{{ r.table_number }}">
-              <td>{{ r.table_number }}</td>
-              <td>{{ r.name }}</td>
-              <td>{{ r.email }}</td>
-              <td>{{ r.phone or "–" }}</td>
-              <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
-              <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}
-                {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
-              <td>{{ r.voucher_code or "–" }}</td>
-              <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>
-                {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
-                {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
-              </td>
-              <td>{{ r.created_at[:16].replace("T", " ") }}</td>
-              <td class="row-actions">
-                <a class="btn secondary small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
+{% if not floorplan_image_url %}<div class="card"><p>Noch kein Lageplan vorhanden.</p><a class="btn secondary" href="{{ url_for('admin_floorplan') }}">Lageplan einrichten</a></div>{% endif %}
+{% else %}
+<section class="card booking-card" aria-label="Buchungsliste">
+<form method="get" class="filter-bar">
+<input type="hidden" name="view" value="{{ view }}">
+<label>Suche<input type="search" name="q" value="{{ search }}" placeholder="Name, E-Mail, Tisch oder Referenz"></label>
+<label>Status<select name="filter"><option value="">Alle</option><option value="pending" {% if booking_filter == 'pending' %}selected{% endif %}>Offene Zahlungen</option><option value="review" {% if booking_filter == 'review' %}selected{% endif %}>Zahlung prüfen</option></select></label>
+<button type="submit">Filtern</button><a class="btn secondary" href="{{ url_for('admin_dashboard', view=view) }}">Zurücksetzen</a>
+</form>
+<p class="hint">{{ registrations|length }} Buchungen · Alle Zeiten in deutscher Ortszeit</p>
+<div class="table-scroll"><table class="admin-table booking-table">
+<thead><tr><th>Tisch</th><th>Teilnehmer</th><th>Zahlung</th><th>Status</th><th>Reserviert bis</th><th>Aktionen</th></tr></thead>
+<tbody>{% for r in registrations %}
+<tr id="booking-{{ r.id }}">
+<td><strong>{{ r.table_number }}</strong></td>
+<td>{{ r.name }}<span class="cell-detail">{{ r.email }}</span></td>
+<td>{{ r.price|admin_money }} {{ currency }}<span class="cell-detail">{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</span></td>
+<td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>{% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen</span>{% elif r.payment_received_at %}<span class="cell-detail">Zahlungseingang erfasst</span>{% endif %}</td>
+<td>{{ display_deadline(r) if r.status == 'pending' else '–' }}</td>
+<td><div class="booking-actions">
                 {% if r.payment_method == 'sepa' and r.status != 'paid' and not r.payment_received_at %}
                 <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
                       onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="secondary small">Zahlungseingang erfassen</button>
+                  <button type="submit" class="small">Zahlungseingang erfassen</button>
                 </form>
                 {% endif %}
                 {% if r.payment_review %}
                 <form method="post" action="{{ url_for('admin_resolve_payment', registration_id=r.id) }}"
                       onsubmit="return confirm('Ist die Zahlung außerhalb der Anwendung geklärt? Hier wird keine Erstattung ausgelöst.');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="secondary small">Klärung erledigt</button>
+                  <button type="submit" class="small">Klärung erledigt</button>
                 </form>
                 {% endif %}
+
+<details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
+<a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
                 {% if r.status != 'cancelled' %}
                 <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
-                      onsubmit="return confirm('Tisch {{ r.table_number }} wirklich freigeben?');">
+                      onsubmit="return confirm('Buchung für Tisch {{ r.table_number }} wirklich stornieren und Tisch freigeben? Eine Zahlung wird dabei nicht automatisch erstattet.');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="danger small">Freigeben</button>
+                  <button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>
                 </form>
                 {% endif %}
-              </td>
-            </tr>
-            {% else %}
-            <tr><td colspan="10">{{ 'Noch keine abgelaufenen/stornierten Anmeldungen.' if view == 'history' else 'Noch keine Anmeldungen.' }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
+
+</div></details></div></td>
+</tr>{% else %}<tr><td colspan="6">{{ 'Keine Buchungen für diese Suche gefunden.' if search or booking_filter else 'Noch keine Buchungen in dieser Ansicht.' }}</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% endif %}
+{% endblock %}

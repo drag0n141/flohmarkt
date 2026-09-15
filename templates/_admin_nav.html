@@ -1,20 +1,13 @@
-{# Shared admin navigation. The entry for the page being viewed is marked
-   rather than left out, so the row keeps the same order on every page. #}
-{% set nav_active = {
-     'admin_event_detail': 'admin_event',
-     'admin_edit_registration': 'admin_dashboard',
-   }.get(request.endpoint, request.endpoint) %}
-<nav>
-  {% for endpoint, label in [
-       ('admin_dashboard', 'Tischübersicht'),
-       ('admin_vouchers', 'Gutscheincodes'),
-       ('admin_floorplan', 'Lageplan'),
-       ('admin_emails', 'E-Mail-Texte'),
-       ('admin_page', 'Seiteninhalt'),
-       ('admin_faq', 'FAQ'),
-       ('admin_event', 'Archiv'),
-     ] %}
-  <a class="{{ 'active' if endpoint == nav_active else '' }}" href="{{ url_for(endpoint) }}">{{ label }}</a>
-  {% endfor %}
-  <a href="{{ url_for('admin_logout') }}">Abmelden</a>
+{% set nav_active = {'admin_event_detail': 'admin_event', 'admin_edit_registration': 'admin_dashboard'}.get(request.endpoint, request.endpoint) %}
+<nav aria-label="Admin-Navigation">
+{% for group, links in [
+  ('Verwaltung', [('admin_dashboard', 'Buchungen'), ('admin_floorplan', 'Lageplan'), ('admin_vouchers', 'Gutscheine'), ('admin_event', 'Veranstaltungen')]),
+  ('Inhalte', [('admin_page', 'Seiteninhalt'), ('admin_faq', 'FAQ'), ('admin_emails', 'E-Mail-Texte')])
+] %}
+<p class="nav-group">{{ group }}</p>
+{% for endpoint, label in links %}
+<a class="{{ 'active' if endpoint == nav_active else '' }}" href="{{ url_for(endpoint) }}" {% if endpoint == nav_active %}aria-current="page"{% endif %}>{{ label }}</a>
+{% endfor %}
+{% endfor %}
+<div class="nav-account"><a href="{{ url_for('admin_logout') }}">Abmelden</a></div>
 </nav>

@@ -1,4 +1,5 @@
 let selectedNumber = null;
+let savingPosition = false;
 
 const statusEl = document.getElementById("picker-status");
 const planInner = document.getElementById("plan-inner");
@@ -53,6 +54,7 @@ function snapToExisting(rawY, excludeNumber) {
 
 if (planImage) {
   planImage.addEventListener("click", async (e) => {
+    if (savingPosition) return;
     if (!selectedNumber) {
       statusEl.textContent = "Bitte zuerst links eine Tischnummer auswählen.";
       return;
@@ -62,19 +64,29 @@ if (planImage) {
     const rawY = ((e.clientY - rect.top) / rect.height) * 100;
     const { y, snappedY } = snapToExisting(rawY, selectedNumber);
 
-    await fetch("/admin/api/set-position", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-      body: JSON.stringify({ number: selectedNumber, x, y }),
-    });
+    const number = selectedNumber;
+    savingPosition = true;
+    statusEl.textContent = "Position wird gespeichert …";
+    statusEl.setAttribute("role", "status");
+    try {
+      const response = await fetch("/admin/api/set-position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+        body: JSON.stringify({ number, x, y }),
+      });
 
-    upsertMarker(selectedNumber, x, y);
-    document
-      .querySelector('.picker-btn[data-number="' + selectedNumber + '"]')
-      .classList.add("placed");
+      if (!response.ok) throw new Error("Speichern fehlgeschlagen");
+      upsertMarker(number, x, y);
+      document
+        .querySelector('.picker-btn[data-number="' + number + '"]')
+        .classList.add("placed");
 
-    const snapNote = snappedY ? " (waagerecht ausgerichtet)" : "";
-    statusEl.textContent = "Tisch " + selectedNumber + " platziert" + snapNote + ". Nächsten Tisch wählen oder fertig.";
+      const snapNote = snappedY ? " (waagerecht ausgerichtet)" : "";
+      statusEl.textContent = "Tisch " + number + " gespeichert" + snapNote + ". Nächsten Tisch wählen oder fertig.";
+    } catch (error) {
+      statusEl.textContent = "Position konnte nicht gespeichert werden. Bitte erneut versuchen.";
+      statusEl.setAttribute("role", "alert");
+    } finally { savingPosition = false; }
   });
 }
 

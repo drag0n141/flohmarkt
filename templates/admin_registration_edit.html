@@ -1,23 +1,15 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Buchung {{ reg.id }} bearbeiten</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-<div class="wrap">
-  <div class="admin-header">
-    <h1>Buchung {{ reg.id }} bearbeiten</h1>
-    {% include "_admin_nav.html" %}
-  </div>
-  {% include "_flashes.html" %}
+{% extends "admin_base.html" %}
+{% block title %}Buchung {{ reg.id }} bearbeiten{% endblock %}
+{% block heading %}Buchung {{ reg.id }} bearbeiten{% endblock %}
+{% block content %}
+<a class="btn secondary" href="{{ url_for('admin_dashboard') }}">← Zurück zu Buchungen</a>
+
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-  <div class="card">
+  <div class="card form-card">
     <p>Aktueller Tisch: <strong>{{ reg.table_number }}</strong> · Status: <strong>{{ reg.status|status_label }}</strong></p>
+    <p>Angemeldet am: {{ reg.created_at|admin_datetime }} · Gutschein: {{ reg.voucher_code or "–" }}</p>
     <p>Zahlungsart: {{ 'Überweisung' if reg.payment_method == 'sepa' else 'PayPal' }}
-      · Preis: {{ '%.2f'|format(reg.price) if reg.price is not none else '–' }} {{ currency }}</p>
+      · Preis: {{ reg.price|admin_money if reg.price is not none else '–' }} {{ currency }}</p>
     {% if reg.payment_method == 'sepa' %}
     <p>Zahlungsreferenz: <strong>{{ reg.payment_reference }}</strong></p>
     <p class="hint">Die Zahlungsreferenz bleibt auch bei einem Tischwechsel unverändert, damit bereits angewiesene Überweisungen zugeordnet werden können.</p>
@@ -25,7 +17,7 @@
     {% if reg.status == 'pending' %}<p>Reserviert bis: <strong>{{ deadline }}</strong> (deutsche Ortszeit)</p>{% endif %}
     <p class="hint">Noch nicht versendete E-Mails werden bei Änderungen mit den aktuellen Buchungsdaten und E-Mail-Vorlagen neu vorbereitet. Bereits versendete Nachrichten werden nicht erneut verschickt. Bitte informiere den Teilnehmer bei Bedarf selbst.</p>
   </div>
-  <div class="card">
+  <div class="card form-card">
     <h2>Buchungsdaten</h2>
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -34,11 +26,11 @@
       <label>Name<input name="name" value="{{ reg.name }}" maxlength="200" required></label>
       <label>E-Mail<input type="email" name="email" value="{{ reg.email }}" maxlength="254" required></label>
       <label>Telefon<input type="tel" name="phone" value="{{ reg.phone or '' }}" maxlength="50"></label>
-      <button type="submit">Buchungsdaten speichern</button>
+      <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Buchungsdaten speichern</button></div>
     </form>
   </div>
   {% if reg.status == 'pending' %}
-  <div class="card">
+  <div class="card form-card">
     <h2>Reservierungsfrist verlängern</h2>
     <p>Die Stunden werden zur bisherigen Frist {{ deadline }} hinzugefügt.</p>
     <form method="post">
@@ -46,12 +38,12 @@
       <input type="hidden" name="version" value="{{ reg.edit_version }}">
       <input type="hidden" name="action" value="extend">
       <label>Zusätzliche Stunden<input type="number" name="hours" min="1" max="720" step="1" value="24" required></label>
-      <button type="submit">Frist verlängern</button>
+      <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Frist verlängern</button></div>
     </form>
   </div>
   {% endif %}
   {% if reg.status in ('pending', 'paid') %}
-  <div class="card">
+  <div class="card form-card">
     <h2>Tisch wechseln</h2>
     <p>Zahlung, Preis, Gutschein und Reservierungsfrist bleiben erhalten. Der bisherige Tisch wird freigegeben.</p>
     {% if free_tables %}
@@ -63,11 +55,10 @@
         <option value="">Bitte auswählen</option>
         {% for table in free_tables %}<option value="{{ table.number }}">Tisch {{ table.number }}</option>{% endfor %}
       </select></label>
-      <button type="submit">Tischwechsel speichern</button>
+      <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Tischwechsel speichern</button></div>
     </form>
     {% else %}<p>Derzeit ist kein anderer Tisch frei.</p>{% endif %}
   </div>
   {% endif %}
-</div>
-</body>
-</html>
+
+{% endblock %}

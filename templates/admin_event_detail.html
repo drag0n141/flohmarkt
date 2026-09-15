@@ -1,22 +1,11 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Archiv – {{ event.name }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>{{ event.name }}</h1>
-      {% include "_admin_nav.html" %}
-    </div>
+{% extends "admin_base.html" %}
+{% block title %}Archiv – {{ event.name }}{% endblock %}
+{% block heading %}{{ event.name }}{% endblock %}
+{% block content %}
+<a class="btn secondary" href="{{ url_for('admin_event') }}">← Zurück zu Veranstaltungen</a>
 
-    {% include "_flashes.html" %}
-
-    <p class="hint">Archiviert am {{ event.archived_at[:16].replace("T", " ") }} ·
-      Gestartet am {{ event.created_at[:16].replace("T", " ") }} ·
+    <p class="hint">Archiviert am {{ event.archived_at|admin_datetime }} ·
+      Gestartet am {{ event.created_at|admin_datetime }} ·
       Öffentlicher Titel damals: „{{ snapshot.get('event_title', '–') }}“.
       Dieser Flohmarkt ist abgeschlossen; Buchungen lassen sich hier nicht mehr ändern.</p>
 
@@ -24,7 +13,7 @@
     <div class="stats">
       <span>Anmeldungen: <strong>{{ snapshot.stats.registrations }}</strong></span>
       <span>bezahlt: <strong>{{ snapshot.stats.paid }}</strong></span>
-      <span>Einnahmen: <strong>{{ "%.2f"|format(snapshot.stats.revenue) }} {{ currency }}</strong></span>
+      <span>Einnahmen: <strong>{{ snapshot.stats.revenue|admin_money }} {{ currency }}</strong></span>
       <span>Tische damals: <strong>{{ snapshot.get('num_tables', '–') }}</strong></span>
     </div>
     {% endif %}
@@ -68,7 +57,7 @@
               <td>{{ r.name }}</td>
               <td>{{ r.email }}</td>
               <td>{{ r.phone or "–" }}</td>
-              <td>{{ "%.2f"|format(r.price) if r.price is not none else "–" }} {{ currency }}</td>
+              <td>{{ r.price|admin_money if r.price is not none else "–" }} {{ currency }}</td>
               <td>{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}
                 {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
               <td>{{ r.voucher_code or "–" }}</td>
@@ -76,7 +65,7 @@
                 {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
                 {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
               </td>
-              <td>{{ r.created_at[:16].replace("T", " ") }}</td>
+              <td>{{ r.created_at|admin_datetime }}</td>
             </tr>
             {% else %}
             <tr><td colspan="9">Für diesen Flohmarkt gab es keine Anmeldungen.</td></tr>
@@ -104,6 +93,5 @@
       <div class="event-info">{{ snapshot.event_info }}</div>
     </div>
     {% endif %}
-  </div>
-</body>
-</html>
+
+{% endblock %}

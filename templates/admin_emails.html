@@ -1,21 +1,13 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – E-Mail-Texte</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>E-Mail-Texte</h1>
-      {% include "_admin_nav.html" %}
-    </div>
+{% extends "admin_base.html" %}
+{% block title %}Admin – E-Mail-Texte{% endblock %}
+{% block heading %}E-Mail-Texte{% endblock %}
+{% block content %}
+<div class="tabs email-tabs" role="tablist" aria-label="E-Mail-Vorlage">
+{% for id, label in [('confirmation', 'Zahlungsbestätigung'), ('sepa', 'Überweisungs-Hinweis'), ('reminder', 'Zahlungserinnerung')] %}
+<button type="button" role="tab" id="tab-{{ id }}" aria-controls="email-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}">{{ label }}</button>
+{% endfor %}</div>
 
-    {% include "_flashes.html" %}
-
-    <div class="card">
+    <div class="card form-card email-panel" id="email-confirmation" aria-labelledby="tab-confirmation">
       <h2>Zahlungsbestätigung</h2>
       <p class="hint">Wird verschickt, sobald eine Zahlung bestätigt ist (PayPal automatisch,
         Überweisung nach manueller Bestätigung). Verfügbare Platzhalter:
@@ -26,11 +18,11 @@
         <input type="hidden" name="kind" value="confirmation">
         <label>Betreff<input type="text" name="subject" value="{{ confirmation_subject }}" required></label>
         <label>Text<textarea name="body" rows="10" required>{{ confirmation_body }}</textarea></label>
-        <button type="submit">Speichern</button>
+        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Speichern</button></div>
       </form>
     </div>
 
-    <div class="card">
+    <div class="card form-card email-panel" id="email-sepa" aria-labelledby="tab-sepa">
       <h2>Überweisungs-Hinweis</h2>
       <p class="hint">Wird sofort nach der Reservierung verschickt, wenn "Überweisung" als
         Zahlungsart gewählt wurde. Hier gehören die Bankdaten (IBAN/BIC/Kontoinhaber) fest in
@@ -44,11 +36,11 @@
         <input type="hidden" name="kind" value="sepa">
         <label>Betreff<input type="text" name="subject" value="{{ sepa_subject }}" required></label>
         <label>Text<textarea name="body" rows="14" required>{{ sepa_body }}</textarea></label>
-        <button type="submit">Speichern</button>
+        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Speichern</button></div>
       </form>
     </div>
 
-    <div class="card">
+    <div class="card form-card email-panel" id="email-reminder" aria-labelledby="tab-reminder">
       <h2>Zahlungserinnerung</h2>
       <p class="hint">Wird automatisch 24 Stunden vor Ablauf der Überweisungsfrist verschickt,
         falls bis dahin noch nicht bezahlt wurde – nur einmal pro Reservierung
@@ -67,9 +59,8 @@
         <input type="hidden" name="kind" value="reminder">
         <label>Betreff<input type="text" name="subject" value="{{ reminder_subject }}" required></label>
         <label>Text<textarea name="body" rows="10" required>{{ reminder_body }}</textarea></label>
-        <button type="submit">Speichern</button>
+        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Speichern</button></div>
       </form>
     </div>
-  </div>
-</body>
-</html>
+
+{% endblock %}
