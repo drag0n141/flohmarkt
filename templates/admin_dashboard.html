@@ -69,7 +69,7 @@
                 {% endif %}
 
 <details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
-<a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
+<a class="btn secondary small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
                 {% if r.status != 'cancelled' %}
                 <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
                       onsubmit="return confirm('Buchung für Tisch {{ r.table_number }} wirklich stornieren und Tisch freigeben? Eine Zahlung wird dabei nicht automatisch erstattet.');">
