@@ -271,3 +271,87 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 @media (min-width: 768px) {
   .inline-form input { min-width: 200px; }
 }
+
+/* Shared admin shell. Public booking styles remain independent. */
+.admin-body { --admin-border: #dfe5ec; --admin-muted: #536174; background: #f5f7fa; }
+.admin-sidebar { position: fixed; inset: 0 auto 0 0; width: 224px; background: #fff; border-right: 1px solid var(--admin-border); padding: 28px 16px; overflow-y: auto; }
+.admin-brand { display: block; padding: 0 12px 24px; font-size: 23px; font-weight: 750; color: #152a45; text-decoration: none; }
+.admin-brand span { display: block; font-size: 12px; color: var(--admin-muted); font-weight: 500; margin-top: 5px; }
+.admin-navigation > summary { display: none; }
+.admin-sidebar nav a { display: block; padding: 11px 12px; border-radius: 7px; color: #405068; text-decoration: none; font-size: 14px; margin: 3px 0; }
+.admin-sidebar nav a:hover { background: #f0f4fa; }
+.admin-sidebar nav a.active { background: #eaf1ff; color: #1755b4; font-weight: 650; }
+.nav-group, .eyebrow { font-size: 12px; font-weight: 650; color: var(--admin-muted); }
+.nav-group { margin: 24px 12px 8px; }
+.nav-account { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--admin-border); }
+.admin-main { margin-left: 224px; padding: 32px clamp(20px, 3vw, 48px) 64px; max-width: 1744px; }
+.admin-header { margin-bottom: 28px; }
+.admin-header h1 { margin: 0; font-size: 28px; letter-spacing: -.5px; }
+.eyebrow { margin: 0 0 8px; }
+.admin-body .card { border: 1px solid var(--admin-border); box-shadow: none; margin-top: 20px; }
+.admin-body h2 { font-size: 19px; margin-top: 0; }
+.admin-body h3 { font-size: 16px; }
+.admin-body p { line-height: 1.55; }
+.admin-body .hint { color: var(--admin-muted); }
+.admin-body button, .admin-body .btn, .admin-body select, .action-menu > summary { min-height: 40px; }
+.admin-body select { display: block; width: 100%; margin-top: 4px; border: 1px solid #bcc7d5; border-radius: 6px; padding: 10px; font: inherit; background: white; }
+.admin-body input:not([type=checkbox]):not([type=radio]), .admin-body textarea { border-color: #bcc7d5; }
+.admin-body select:focus-visible { outline: 2px solid #1f2430; outline-offset: 2px; }
+.admin-body button:disabled { opacity: .55; cursor: wait; }
+.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--admin-border); }
+.form-actions .danger { margin-right: auto; }
+.admin-body .form-card { max-width: 850px; }
+.stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-cards > div { background: white; padding: 18px 20px; border: 1px solid var(--admin-border); border-radius: 10px; }
+.stat-cards span { display: block; color: var(--admin-muted); }
+.stat-cards strong { display: block; font-size: 28px; margin-top: 8px; color: #152a45; }
+.admin-body .tabs { margin-top: 24px; flex-wrap: wrap; border-color: var(--admin-border); }
+.filter-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.filter-bar label { margin: 0; }
+.filter-bar label:first-of-type { flex: 1; min-width: 220px; }
+.filter-bar select { font-size: 15px; }
+.admin-body .admin-table th { padding: 12px; background: #f7f9fc; }
+.admin-body .admin-table td { padding: 14px 12px; vertical-align: top; }
+.admin-body .admin-table tr:hover { background: #fafcff; }
+.cell-detail { display: block; font-size: 12px; color: var(--admin-muted); margin-top: 6px; overflow-wrap: anywhere; }
+.admin-body .badge { display: inline-block; font-weight: 650; line-height: 1.6; }
+.admin-body .badge.paid { background: #e3f4e9; color: #196038; }
+.admin-body .badge.pending { background: #fff0c2; color: #755300; }
+.admin-body .badge.cancelled { background: #edf0f4; color: #4b5667; }
+.error-text { color: #96272c; }
+.booking-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 180px; }
+.booking-actions form button { width: 100%; }
+.action-menu > summary { cursor: pointer; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; font-size: 13px; white-space: nowrap; color: #334155; background: #fff; }
+.action-items { display: grid; gap: 8px; margin-top: 8px; padding: 10px; background: #f5f7fa; border: 1px solid var(--admin-border); border-radius: 6px; }
+.action-items a { padding: 8px; font-size: 14px; color: #1755b4; }
+.action-items button { text-align: left; }
+.admin-body .danger-zone { border-color: #e6a8ad; }
+.danger-zone h2 { color: #96272c; }
+.faq-editor > summary { cursor: pointer; font-weight: 650; padding: 4px 0; }
+.faq-editor[open] > summary { margin-bottom: 24px; }
+.email-tabs { display: none; }
+.js-enabled .email-tabs { display: flex; }
+.skip-link { position: fixed; left: 240px; top: -100px; z-index: 10; background: white; padding: 12px; }
+.skip-link:focus { top: 8px; }
+@media (max-width: 1000px) { .stat-cards { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) {
+ .admin-sidebar { position: static; width: auto; padding: 16px; border-right: 0; border-bottom: 1px solid var(--admin-border); }
+ .admin-brand { padding: 0 0 12px; font-size: 20px; }
+ .admin-brand span { display: inline; margin-left: 8px; }
+ .admin-navigation > summary { display: list-item; cursor: pointer; padding: 10px 0; }
+ .admin-main { margin-left: 0; padding: 24px 16px 48px; }
+ .admin-header h1 { font-size: 24px; }
+ .admin-body .card { padding: 16px; }
+ .admin-body .inline-form { align-items: stretch; }
+ .admin-body .inline-form label { flex: 1 1 180px; }
+ .admin-body .inline-form input { width: 100%; min-width: 0; }
+ .stat-cards { gap: 10px; }
+ .stat-cards > div { padding: 14px; }
+ .skip-link { left: 16px; }
+}
+.email-tabs button { background: transparent; color: #536174; border-radius: 0; border-bottom: 2px solid transparent; }
+.email-tabs button[aria-selected=true] { color: #1755b4; border-bottom-color: #1755b4; font-weight: 650; }
+.email-tabs button:hover { background: #eaf1ff; }
+.admin-body .picker-btn:hover { background: #eaf1ff; color: #1755b4; }
+.admin-body .picker-btn.active:hover { background: #1a5fd0; color: #fff; }
+@media (max-width: 480px) { .form-actions { flex-wrap: wrap; } }

@@ -94,7 +94,7 @@ def test_destructive_actions_are_marked_as_such(mod):
     client, headers = admin(mod)
     register(client, headers, payment_method="sepa")
     assert (
-        '<button type="submit" class="danger small">Freigeben</button>' in client.get("/admin").text
+        '<button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>' in client.get("/admin").text
     )
 
     client.post(
@@ -106,3 +106,73 @@ def test_destructive_actions_are_marked_as_such(mod):
         '<button type="submit" class="danger small">Löschen</button>'
         in client.get("/admin/event").text
     )
+
+
+def test_dashboard_search_filters_and_deadline(mod):
+    client, headers = admin(mod)
+    register(client, headers, table=1, payment_method="sepa", name="Anna Beispiel")
+    register(client, headers, table=2, payment_method="sepa", name="Berta Muster")
+    reg = get_reg(mod, 1)
+    for query in ("ANNA", "1", reg["payment_reference"]):
+        page = client.get("/admin", query_string={"q": query}).text
+        assert "Anna Beispiel" in page
+        assert "Berta Muster" not in page
+    assert mod.display_deadline(reg) in client.get("/admin").text
+    client.post("/admin/confirm-sepa/2", headers=headers)
+    page = client.get("/admin?filter=pending").text
+    assert "Anna Beispiel" in page and "Berta Muster" not in page
+    assert "Keine Buchungen" in client.get("/admin?q=does-not-exist").text
+
+
+def test_review_filter_preserves_late_payment_workflow(mod):
+    client, headers = admin(mod)
+    register(client, headers, payment_method="sepa", name="Zahlungsprüfung")
+    client.post("/admin/cancel/1", headers=headers)
+    client.post("/admin/confirm-sepa/1", headers=headers)
+    page = client.get("/admin?filter=review").text
+    assert "Zahlungsprüfung" in page
+    assert "Klärung erledigt" in page
+
+
+def test_booking_actions_keep_only_payment_outside_menu(mod):
+    from html.parser import HTMLParser
+
+    class Actions(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_menu = False
+            self.in_action = False
+            self.items = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "details" and attrs.get("class") == "action-menu":
+                self.in_menu = True
+                assert "open" not in attrs
+            if tag in ("button", "a"):
+                self.in_action = True
+
+        def handle_endtag(self, tag):
+            if tag == "details":
+                self.in_menu = False
+            if tag in ("button", "a"):
+                self.in_action = False
+
+        def handle_data(self, data):
+            if self.in_action and data.strip():
+                self.items.append((data.strip(), self.in_menu))
+
+    client, headers = admin(mod)
+    register(client, headers, payment_method="sepa")
+    parser = Actions()
+    parser.feed(client.get("/admin").text)
+    assert ("Bearbeiten", True) in parser.items
+    assert ("Buchung stornieren und Tisch freigeben", True) in parser.items
+    assert ("Zahlungseingang erfassen", False) in parser.items
+
+
+def test_german_admin_formatting(mod):
+    assert mod.admin_datetime("2026-01-01T23:30:00") == "02.01.2026 00:30"
+    assert mod.admin_datetime("2026-07-01T10:00:00+00:00") == "01.07.2026 12:00"
+    assert mod.admin_money(1234.5) == "1.234,50"
+    assert mod.admin_money(None) == "–"

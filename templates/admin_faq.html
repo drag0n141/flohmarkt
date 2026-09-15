@@ -1,22 +1,10 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – FAQ</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>FAQ</h1>
-      {% include "_admin_nav.html" %}
-    </div>
+{% extends "admin_base.html" %}
+{% block title %}Admin – FAQ{% endblock %}
+{% block heading %}FAQ{% endblock %}
+{% block content %}
 
     <p class="hint">Erscheint als ausklappbarer Bereich oberhalb der Tischauswahl auf der
       öffentlichen Seite. Die Reihenfolge hier entspricht der Anzeige-Reihenfolge.</p>
-
-    {% include "_flashes.html" %}
 
     <div class="card">
       <h2>Neue Frage hinzufügen</h2>
@@ -25,32 +13,30 @@
         <input type="hidden" name="action" value="add">
         <label>Frage<input type="text" name="question" required></label>
         <label>Antwort<textarea name="answer" rows="3" required></textarea></label>
-        <button type="submit">Hinzufügen</button>
+        <div class="form-actions"><button type="submit">Frage hinzufügen</button></div>
       </form>
     </div>
 
     {% for item in faq_items %}
-    <div class="card">
-      <form method="post">
+    <details class="card form-card faq-editor">
+      <summary>{{ item.question }}</summary>
+      <form method="post" id="faq-edit-{{ item.id }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="update">
         <input type="hidden" name="faq_id" value="{{ item.id }}">
         <label>Frage<input type="text" name="question" value="{{ item.question }}" required></label>
         <label>Antwort<textarea name="answer" rows="3" required>{{ item.answer }}</textarea></label>
-        <div class="row">
-          <button type="submit">Speichern</button>
-        </div>
+
       </form>
-      <form method="post" onsubmit="return confirm('Frage wirklich löschen?');" class="row" style="margin-top: 8px;">
+      <form method="post" onsubmit="return confirm('Frage wirklich löschen?');" class="form-actions">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="faq_id" value="{{ item.id }}">
-        <button type="submit" class="danger small">Löschen</button>
+        <button type="submit" class="danger">Löschen</button><button type="reset" form="faq-edit-{{ item.id }}" class="secondary">Zurücksetzen</button><button type="submit" form="faq-edit-{{ item.id }}">Speichern</button>
       </form>
-    </div>
+    </details>
     {% else %}
     <p class="hint">Noch keine Fragen angelegt.</p>
     {% endfor %}
-  </div>
-</body>
-</html>
+
+{% endblock %}

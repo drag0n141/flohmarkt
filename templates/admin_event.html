@@ -1,19 +1,7 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin – Flohmarkt archivieren</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="wrap wide">
-    <div class="admin-header">
-      <h1>Flohmarkt archivieren</h1>
-      {% include "_admin_nav.html" %}
-    </div>
-
-    {% include "_flashes.html" %}
+{% extends "admin_base.html" %}
+{% block title %}Admin – Veranstaltungen{% endblock %}
+{% block heading %}Veranstaltungen{% endblock %}
+{% block content %}
 
     <div class="card">
       <h2>Aktueller Flohmarkt</h2>
@@ -23,7 +11,7 @@
         <label>Name<input type="text" name="name" value="{{ event.name }}" maxlength="120" required></label>
         <button type="submit" class="secondary">Namen speichern</button>
       </form>
-      <p class="hint">Gestartet am {{ event.created_at[:16].replace("T", " ") }}.
+      <p class="hint">Gestartet am {{ event.created_at|admin_datetime }}.
         Der Name erscheint nur im Admin-Bereich und später im Archiv. Der öffentliche
         Seitentitel lautet derzeit „{{ event_title }}“.</p>
       <div class="stats">
@@ -36,7 +24,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card danger-zone">
       <h2>Archivieren und neuen Flohmarkt starten</h2>
       <p class="hint">Der aktuelle Flohmarkt wird mit allen Anmeldungen ins Archiv verschoben
         und bleibt dort einsehbar. Anschließend sind alle Tische wieder frei. Noch offene,
@@ -96,8 +84,8 @@
           Ja, aktuellen Flohmarkt archivieren und einen neuen starten
         </label>
 
-        <div class="row">
-          <button type="submit">Archivieren und neu starten</button>
+        <div class="form-actions">
+          <button type="submit" class="danger">Archivieren und neu starten</button>
         </div>
       </form>
     </div>
@@ -118,9 +106,9 @@
             {% for a in archived %}
             <tr>
               <td><a href="{{ url_for('admin_event_detail', event_id=a.id) }}">{{ a.name }}</a></td>
-              <td>{{ a.created_at[:10] }} – {{ a.archived_at[:10] }}</td>
+              <td>{{ a.created_at|admin_date }} – {{ a.archived_at|admin_date }}</td>
               <td>{{ a.registrations }}</td>
-              <td class="row-actions">
+              <td><details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
                 <a class="btn secondary small" href="{{ url_for('admin_event_detail', event_id=a.id) }}">Ansehen</a>
                 <form method="post"
                       onsubmit="return confirm('Archiv „{{ a.name }}“ mit allen Anmeldungen unwiderruflich löschen?');">
@@ -129,7 +117,7 @@
                   <input type="hidden" name="event_id" value="{{ a.id }}">
                   <button type="submit" class="danger small">Löschen</button>
                 </form>
-              </td>
+              </div></details></td>
             </tr>
             {% else %}
             <tr><td colspan="4">Noch kein Flohmarkt archiviert.</td></tr>
@@ -138,6 +126,5 @@
         </table>
       </div>
     </div>
-  </div>
-</body>
-</html>
+
+{% endblock %}

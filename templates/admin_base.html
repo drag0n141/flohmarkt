@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>{% block title %}Admin – Flohmarkt{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="{{ url_for('static', filename='admin.js') }}" defer></script>
+</head>
+<body class="admin-body">
+<a class="skip-link" href="#main">Zum Inhalt</a>
+<aside class="admin-sidebar">
+  <a class="admin-brand" href="{{ url_for('admin_dashboard') }}">Flohmarkt <span>Verwaltung</span></a>
+  <details class="admin-navigation" open>
+    <summary>Menü</summary>
+    {% include "_admin_nav.html" %}
+  </details>
+</aside>
+<main id="main" class="admin-main">
+  <header class="admin-header">
+    <div><p class="eyebrow">{{ admin_event_name }}</p><h1>{% block heading %}{% endblock %}</h1></div>
+    <a class="btn secondary" href="{{ url_for('index') }}" target="_blank" rel="noopener">Öffentliche Seite ↗</a>
+  </header>
+  {% include "_flashes.html" %}
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>
