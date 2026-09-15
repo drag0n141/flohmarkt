@@ -2,6 +2,26 @@
 {% block title %}Admin – Lageplan{% endblock %}
 {% block heading %}Lageplan verwalten{% endblock %}
 {% block content %}
+<section class="card">
+<h2>Tischbestand</h2><p>{{ tables|length }} Tische angelegt. Preise und Gültigkeit verwaltest du unter <a href="{{ url_for('admin_pricing') }}">Preise & Fristen</a>.</p>
+<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="add">
+<label>Ab Nummer<input type="number" name="start" min="1" required></label><label>Bis Nummer (optional)<input type="number" name="end" min="1"></label>
+<label>Öffentlicher Tarif<select name="tariff_id"><option value="">Später zuweisen</option>{% for t in tariffs if t.visibility == 'public' and t.all_tables %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
+<button type="submit">Tische hinzufügen</button></form>
+<p class="hint">Bis zu 1.000 Tische auf einmal. Belegte Tische können nicht deaktiviert werden. Tische mit Buchungshistorie bleiben erhalten.</p>
+{% for table in tables %}
+<details class="detail-editor"><summary>Tisch {{ table.number }} · {{ table.status|status_label }}{{ ' · deaktiviert' if not table.active else '' }}</summary>
+<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="table_id" value="{{ table.id }}">
+<label>Nummer<input type="number" name="number" min="1" value="{{ table.number }}" required></label>
+<label>Tarif<select name="tariff_id"><option value="">Noch kein Tarif</option>{% for t in tariffs if t.visibility == 'public' %}<option value="{{ t.id }}" {% if t.id == table.tariff_id %}selected{% endif %}>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
+<label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if table.active %}checked{% endif %}>Buchbar</label><button type="submit">Speichern</button>
+</form>
+<form method="post" action="{{ url_for('admin_tables') }}" onsubmit="return confirm('Diesen Tisch entfernen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="table_id" value="{{ table.id }}"><button class="danger small" type="submit">Entfernen</button></form>
+</details>{% endfor %}
+</section>
+
 
     <div class="card">
       <h2>1. Lageplan-Bild hochladen</h2>

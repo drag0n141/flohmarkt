@@ -9,8 +9,7 @@
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body class="booking-body"
-      data-price-standard="{{ price_standard }}"
-      data-price-internal="{{ price_internal }}"
+      data-event-id="{{ event_id }}"
       data-currency="{{ currency }}">
 <main class="booking-wrap">
   <header class="booking-header">
@@ -33,6 +32,7 @@
   </div>
 
   <section id="step-select" class="card" hidden aria-labelledby="select-heading">
+    {% if not booking_ready %}<p class="notice" role="status">Die Buchung ist derzeit noch nicht verfügbar oder die Buchungsfrist ist bereits abgelaufen. Bitte versuche es später erneut.</p>{% endif %}
     <div class="booking-section-header"><h2 id="select-heading" tabindex="-1">Tisch auswählen</h2><button type="button" id="refresh-tables" class="secondary">Aktualisieren</button></div>
     <p id="availability" role="status">Verfügbarkeit wird geladen …</p>
     <p class="hint">Dein Tisch wird erst mit dem Absenden deiner Daten reserviert.</p>
@@ -74,7 +74,7 @@
         {% endfor %}
       </fieldset>
       <div class="booking-summary" aria-label="Zusammenfassung">
-        <dl><div><dt>Tisch</dt><dd id="selected-table-label"></dd></div><div><dt>Standgebühr</dt><dd id="summary-standard"></dd></div><div id="summary-discount-row" hidden><dt>Mitgliederrabatt</dt><dd id="summary-discount"></dd></div><div><dt>Zahlungsart</dt><dd id="summary-method"></dd></div><div class="summary-total"><dt>Gesamtbetrag</dt><dd id="live-price-label" aria-live="polite"></dd></div></dl>
+        <dl><div><dt>Tisch</dt><dd id="selected-table-label"></dd></div><div><dt>Standgebühr</dt><dd id="summary-standard"></dd></div><div id="summary-discount-row" hidden><dt>Preisanpassung durch Gutschein</dt><dd id="summary-discount"></dd></div><div><dt>Zahlungsart</dt><dd id="summary-method"></dd></div><div class="summary-total"><dt>Gesamtbetrag</dt><dd id="live-price-label" aria-live="polite"></dd></div></dl>
       </div>
       <p id="form-error" class="error" role="alert" tabindex="-1"></p>
       <button type="button" id="choose-another-table" class="secondary" hidden>Anderen Tisch auswählen</button>

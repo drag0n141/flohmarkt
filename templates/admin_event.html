@@ -4,7 +4,7 @@
 {% block content %}
 
     <div class="card">
-      <h2>Aktueller Flohmarkt</h2>
+      <h2>Aktueller Flohmarkt</h2><p><a class="btn secondary" href="{{ url_for('admin_pricing') }}">Preise & Fristen einstellen</a></p>
       <form method="post" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="rename">
@@ -50,6 +50,9 @@
         <p class="hint">Alles ohne Häkchen wird zurückgesetzt. Anmeldungen und
           Tischbelegungen werden immer zurückgesetzt – sie gehören zum archivierten Flohmarkt.</p>
         <div class="payment-choice">
+          <label class="radio-inline"><input type="checkbox" name="keep" value="tariffs" checked>Tarife und Tischzuordnungen</label>
+          <label class="radio-inline"><input type="checkbox" name="keep" value="deadlines" checked>Zahlungsfrist (ohne festen Endtermin)</label>
+          <label class="radio-inline"><input type="checkbox" name="keep" value="tables" checked>Tischbestand einschließlich deaktivierter Tische</label>
           <label class="radio-inline">
             <input type="checkbox" name="keep" value="floorplan" checked>
             Lageplan (hochgeladenes Bild)

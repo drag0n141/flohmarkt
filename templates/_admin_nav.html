@@ -1,7 +1,7 @@
 {% set nav_active = {'admin_event_detail': 'admin_event', 'admin_edit_registration': 'admin_dashboard'}.get(request.endpoint, request.endpoint) %}
 <nav aria-label="Admin-Navigation">
 {% for group, links in [
-  ('Verwaltung', [('admin_dashboard', 'Buchungen'), ('admin_floorplan', 'Lageplan'), ('admin_vouchers', 'Gutscheine'), ('admin_event', 'Veranstaltungen')]),
+  ('Verwaltung', [('admin_dashboard', 'Buchungen'), ('admin_floorplan', 'Tische & Lageplan'), ('admin_pricing', 'Preise & Fristen'), ('admin_vouchers', 'Gutscheine'), ('admin_event', 'Veranstaltungen')]),
   ('Inhalte', [('admin_page', 'Seiteninhalt'), ('admin_faq', 'FAQ'), ('admin_emails', 'E-Mail-Texte')])
 ] %}
 <p class="nav-group">{{ group }}</p>
