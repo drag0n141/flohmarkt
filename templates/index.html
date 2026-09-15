@@ -14,11 +14,10 @@
       data-currency="{{ currency }}">
 <main class="booking-wrap">
   <header class="booking-header">
-    <p class="eyebrow">Dein Platz auf dem Flohmarkt</p>
     <h1>{{ event_title }}</h1>
     {% if event_info %}<p class="event-info">{{ event_info }}</p>{% endif %}
-    <p>Standgebühr pro Tisch: <strong id="standard-price">{{ '%.2f'|format(price_standard)|replace('.', ',') }} {{ currency }}</strong></p>
   </header>
+  {% if faq_items %}<details class="card faq-block"><summary>Häufige Fragen</summary><dl class="faq-list">{% for item in faq_items %}<dt>{{ item.question }}</dt><dd>{{ item.answer }}</dd>{% endfor %}</dl></details>{% endif %}
   <nav aria-label="Buchungsfortschritt">
     <ol class="booking-progress">
       <li data-step="select" aria-current="step"><span>1</span>Tisch auswählen</li>
@@ -126,7 +125,6 @@
     <button type="button" class="secondary" data-new-booking>Weiteren Tisch auswählen</button>
   </section>
 
-  {% if faq_items %}<details class="card faq-block"><summary>Häufige Fragen</summary><dl class="faq-list">{% for item in faq_items %}<dt>{{ item.question }}</dt><dd>{{ item.answer }}</dd>{% endfor %}</dl></details>{% endif %}
 </main>
 {% if paypal_client_id and 'paypal' in payment_methods_enabled %}
 <script id="paypal-sdk" data-sdk-src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&amp;currency={{ currency }}" src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&amp;currency={{ currency }}" async></script>

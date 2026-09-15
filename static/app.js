@@ -455,6 +455,5 @@ async function start() {
   }
 }
 byId('retry-startup').addEventListener('click', start);
-byId('standard-price').textContent = money(config.priceStandard);
 updateSummary();
 start();
