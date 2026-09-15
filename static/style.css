@@ -40,9 +40,9 @@ h1 { margin-bottom: 4px; }
 
 .legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 14px; color: #444; }
 .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
-.dot.free { background: #2fa84f; }
-.dot.held { background: #e0a300; }
-.dot.booked { background: #c94b4b; }
+.dot.free { background: #21823f; }
+.dot.held { background: #f0b429; }
+.dot.booked { background: #c62828; }
 
 .grid {
   display: grid;
@@ -243,9 +243,9 @@ button.small, .btn.small { padding: 6px 10px; font-size: 13px; }
   box-shadow: 0 0 0 2px #fff;
   text-decoration: none;
 }
-.plan-table-marker.free { background: #2fa84f; cursor: pointer; }
-.plan-table-marker.held { background: #e0a300; cursor: not-allowed; opacity: 0.85; }
-.plan-table-marker.booked { background: #c94b4b; cursor: not-allowed; opacity: 0.85; }
+.plan-table-marker.free { background: #21823f; color: #fff; cursor: pointer; opacity: 1; }
+.plan-table-marker.held { background: #f0b429; color: #302300; cursor: not-allowed; opacity: 1; }
+.plan-table-marker.booked { background: #c62828; color: #fff; cursor: not-allowed; opacity: 1; }
 
 .dashboard-plan-container .plan-table-marker { cursor: pointer; }
 
@@ -387,8 +387,8 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 .public-table.booked, .public-table.booked:hover { background: #f6e8e9; color: #8c3d43; border-color: #e8c6c9; }
 .booking-body .plan-table-marker { width: 40px; height: 40px; min-height: 40px; }
 .booking-body .plan-table-marker.free:hover { background: #267443; }
-.booking-body .plan-table-marker.held:hover { background: #e0a300; }
-.booking-body .plan-table-marker.booked:hover { background: #c94b4b; }
+.booking-body .plan-table-marker.held:hover { background: #f0b429; }
+.booking-body .plan-table-marker.booked:hover { background: #c62828; }
 .booking-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; }
 .booking-body input { min-height: 44px; border-color: #b9c5d4; font-size: 16px; }
 .payment-options { border: 0; padding: 0; margin: 24px 0; }

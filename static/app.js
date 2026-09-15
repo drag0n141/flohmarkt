@@ -15,7 +15,7 @@ let booking = null;
 let currentStep = null;
 let tables = [];
 let floorplan = null;
-let tableView = matchMedia('(max-width: 600px)').matches ? 'list' : 'plan';
+let tableView = 'plan';
 let voucherValid = false;
 let voucherGeneration = 0;
 let voucherTimer;
