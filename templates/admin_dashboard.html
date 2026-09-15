@@ -47,8 +47,8 @@
 <thead><tr><th>Tisch</th><th>Teilnehmer</th><th>Zahlung</th><th>Status</th><th>Reserviert bis</th><th>Aktionen</th></tr></thead>
 <tbody>{% for r in registrations %}
 <tr id="booking-{{ r.id }}">
-<td><strong>{{ r.table_number }}</strong></td>
-<td>{{ r.name }}<span class="cell-detail">{{ r.email }}</span></td>
+<td><a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail><strong>{{ r.table_number }}</strong></a></td>
+<td><a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail>{{ r.name }}</a><span class="cell-detail">{{ r.email }}</span></td>
 <td>{{ r.price|admin_money }} {{ currency }}<span class="cell-detail">{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</span></td>
 <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>{% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen</span>{% elif r.payment_received_at %}<span class="cell-detail">Zahlungseingang erfasst</span>{% endif %}</td>
 <td>{{ display_deadline(r) if r.status == 'pending' else '–' }}</td>
@@ -68,18 +68,14 @@
                 </form>
                 {% endif %}
 
-<details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
-<a class="btn secondary small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}">Bearbeiten</a>
-                {% if r.status != 'cancelled' %}
-                <form method="post" action="{{ url_for('admin_cancel', registration_id=r.id) }}"
-                      onsubmit="return confirm('Buchung für Tisch {{ r.table_number }} wirklich stornieren und Tisch freigeben? Eine Zahlung wird dabei nicht automatisch erstattet.');">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>
-                </form>
-                {% endif %}
-
-</div></details></div></td>
+<a class="btn secondary small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail>Details</a></div></td>
 </tr>{% else %}<tr><td colspan="6">{{ 'Keine Buchungen für diese Suche gefunden.' if search or booking_filter else 'Noch keine Buchungen in dieser Ansicht.' }}</td></tr>{% endfor %}</tbody>
 </table></div></section>
 {% endif %}
+<dialog id="booking-detail-panel" class="detail-panel" aria-labelledby="detail-panel-title">
+  <header class="detail-panel-header"><h2 id="detail-panel-title">Buchungsdetails</h2><button type="button" id="close-detail-panel" class="secondary" autofocus>Schließen</button></header>
+  <p id="detail-panel-status" role="status"></p>
+  <a id="detail-panel-full-page" class="detail-full-page">Als vollständige Seite öffnen</a>
+  <div id="detail-panel-body"></div>
+</dialog>
 {% endblock %}

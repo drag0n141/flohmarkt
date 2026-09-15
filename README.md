@@ -259,7 +259,7 @@ use `Cache-Control: no-store`. Actual capture remains tied to PayPal approval.
 
 ## Admin booking management
 
-Open `/admin` and select **Weitere Aktionen → Bearbeiten** for a registration. The edit page
+Open `/admin` and click a participant name, table number or **Details** to open the side panel. On mobile it fills the screen; the overview keeps its filters and scroll position. The full edit page remains available without JavaScript. The edit page
 provides three separate forms:
 
 - **Buchungsdaten:** correct the name, email address and phone number, including

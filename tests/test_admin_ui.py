@@ -94,7 +94,7 @@ def test_destructive_actions_are_marked_as_such(mod):
     client, headers = admin(mod)
     register(client, headers, payment_method="sepa")
     assert (
-        '<button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>' in client.get("/admin").text
+        '<button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>' in client.get("/admin/registrations/1/edit").text
     )
 
     client.post(
@@ -134,41 +134,19 @@ def test_review_filter_preserves_late_payment_workflow(mod):
     assert "Klärung erledigt" in page
 
 
-def test_booking_actions_keep_only_payment_outside_menu(mod):
-    from html.parser import HTMLParser
-
-    class Actions(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.in_menu = False
-            self.in_action = False
-            self.items = []
-
-        def handle_starttag(self, tag, attrs):
-            attrs = dict(attrs)
-            if tag == "details" and attrs.get("class") == "action-menu":
-                self.in_menu = True
-                assert "open" not in attrs
-            if tag in ("button", "a"):
-                self.in_action = True
-
-        def handle_endtag(self, tag):
-            if tag == "details":
-                self.in_menu = False
-            if tag in ("button", "a"):
-                self.in_action = False
-
-        def handle_data(self, data):
-            if self.in_action and data.strip():
-                self.items.append((data.strip(), self.in_menu))
-
+def test_booking_details_replace_the_action_menu(mod):
     client, headers = admin(mod)
     register(client, headers, payment_method="sepa")
-    parser = Actions()
-    parser.feed(client.get("/admin").text)
-    assert ("Bearbeiten", True) in parser.items
-    assert ("Buchung stornieren und Tisch freigeben", True) in parser.items
-    assert ("Zahlungseingang erfassen", False) in parser.items
+    page = client.get("/admin").text
+    assert page.count('data-booking-detail') == 3
+    assert 'id="booking-detail-panel"' in page
+    assert 'Weitere Aktionen' not in page
+    assert 'Buchung stornieren und Tisch freigeben' not in page
+    assert 'Zahlungseingang erfassen' in page
+    detail = client.get("/admin/registrations/1/edit").text
+    assert 'id="booking-details"' in detail
+    assert 'Kontaktdaten bearbeiten' in detail
+    assert 'Buchung stornieren und Tisch freigeben' in detail
 
 
 def test_german_admin_formatting(mod):
@@ -176,3 +154,33 @@ def test_german_admin_formatting(mod):
     assert mod.admin_datetime("2026-07-01T10:00:00+00:00") == "01.07.2026 12:00"
     assert mod.admin_money(1234.5) == "1.234,50"
     assert mod.admin_money(None) == "–"
+
+
+def test_detail_panel_form_roundtrip(mod):
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+    if not shutil.which('node') or subprocess.run(
+        ['node', '-e', "require.resolve('jsdom')"], capture_output=True
+    ).returncode:
+        pytest.skip('Install jsdom and set NODE_PATH to run panel DOM checks')
+    client, headers = admin(mod)
+    register(client, headers, payment_method='sepa')
+    dashboard = client.get('/admin?q=Example&filter=pending').text
+    detail = client.get('/admin/registrations/1/edit').text
+    error = client.post('/admin/registrations/1/edit', headers=headers, data={
+        'action': 'contact', 'version': '0', 'name': 'Changed name', 'email': 'invalid'
+    })
+    assert error.status_code == 400
+    saved = client.post('/admin/registrations/1/edit', headers=headers, data={
+        'action': 'contact', 'version': '0', 'name': 'Changed name', 'email': 'changed@example.org'
+    }, follow_redirects=True)
+    assert saved.status_code == 200
+    cancelled = client.post('/admin/cancel/1', headers=headers, follow_redirects=True)
+    cancelled_detail = client.get('/admin/registrations/1/edit')
+    result = subprocess.run(['node', 'tests/admin_panel_dom.cjs'], input=json.dumps({
+        'dashboard': dashboard, 'detail': detail, 'error': error.text, 'saved': saved.text,
+        'cancelled': cancelled.text, 'cancelled_detail': cancelled_detail.text
+    }), text=True, capture_output=True, cwd=Path(__file__).resolve().parents[1], timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
