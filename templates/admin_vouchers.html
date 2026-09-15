@@ -57,7 +57,7 @@
                 </span>
               </td>
               <td>{{ v.created_at|admin_datetime }}</td>
-              <td><details class="action-menu"><summary>Weitere Aktionen</summary><div class="action-items">
+              <td><div class="row-actions">
                 <form method="post">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="action" value="toggle">
@@ -72,7 +72,7 @@
                   <input type="hidden" name="voucher_id" value="{{ v.id }}">
                   <button type="submit" class="danger small">Löschen</button>
                 </form>
-              </div></details></td>
+              </div></td>
             </tr>
             {% else %}
             <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
