@@ -44,9 +44,6 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Configuration – adjust here or via .env
 # ---------------------------------------------------------------------------
-NUM_TABLES = int(os.environ.get("NUM_TABLES", 30))
-PRICE_STANDARD = float(os.environ.get("PRICE_STANDARD", os.environ.get("PRICE", 15.00)))
-PRICE_INTERNAL = float(os.environ.get("PRICE_INTERNAL", PRICE_STANDARD))
 CURRENCY = os.environ.get("CURRENCY", "EUR")
 
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
@@ -58,7 +55,6 @@ PAYPAL_API_BASE = (
 )
 
 HOLD_MINUTES = 10  # how long a PayPal table hold stays reserved for payment
-SEPA_HOLD_HOURS = int(os.environ.get("SEPA_HOLD_HOURS", 48))  # same, for bank transfer
 DB_PATH = os.environ.get("DB_PATH", "flohmarkt.db")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
@@ -319,13 +315,7 @@ def init_db():
     db.execute("UPDATE registrations SET event_id=? WHERE event_id IS NULL", (active_event_row[0],))
     db.execute("CREATE INDEX IF NOT EXISTS registrations_event ON registrations(event_id)")
 
-    # Insert any missing tables up to NUM_TABLES. Uses MAX(number) rather than
-    # COUNT(*) so that raising NUM_TABLES later and restarting adds the new
-    # tables instead of only seeding once on the very first run.
-    existing_max = db.execute("SELECT COALESCE(MAX(number), 0) FROM tables").fetchone()[0]
-    if existing_max < NUM_TABLES:
-        for i in range(existing_max + 1, NUM_TABLES + 1):
-            db.execute("INSERT INTO tables (number, status) VALUES (?, 'free')", (i,))
+    migrate_event_configuration(db, active_event_row[0])
 
     # Seed a few placeholder FAQ entries on first run so the admin has
     # something concrete to edit/replace rather than an empty list; never
@@ -349,6 +339,121 @@ def init_db():
 
     db.commit()
     db.close()
+
+
+def migrate_event_configuration(db, event_id):
+    """One-time import. Environment variables never override persisted settings."""
+    event_cols = {r[1] for r in db.execute("PRAGMA table_info(events)")}
+    for name, definition in {"sepa_hold_hours": "INTEGER", "payment_cutoff": "TEXT"}.items():
+        if name not in event_cols:
+            db.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
+    db.execute("""CREATE TABLE IF NOT EXISTS tariffs (
+        id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, name TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        visibility TEXT NOT NULL DEFAULT 'public', active INTEGER NOT NULL DEFAULT 1,
+        all_tables INTEGER NOT NULL DEFAULT 1, UNIQUE(event_id, name))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS tariff_tables (
+        tariff_id INTEGER NOT NULL, table_id INTEGER NOT NULL,
+        PRIMARY KEY(tariff_id, table_id))""")
+    cols = {r[1] for r in db.execute("PRAGMA table_info(tables)")}
+    if "event_id" not in cols:
+        db.execute("""CREATE TABLE tables_new (
+            id INTEGER PRIMARY KEY, number INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'free',
+            held_at TEXT, registration_id INTEGER, pos_x REAL, pos_y REAL,
+            event_id INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, tariff_id INTEGER,
+            UNIQUE(event_id, number))""")
+        db.execute(
+            "INSERT INTO tables_new (id, number, status, held_at, registration_id, pos_x, pos_y, event_id) "
+            "SELECT id, number, status, held_at, registration_id, pos_x, pos_y, ? FROM tables",
+            (event_id,),
+        )
+        db.execute("DROP TABLE tables")
+        db.execute("ALTER TABLE tables_new RENAME TO tables")
+    for table, additions in {
+        "vouchers": {"tariff_id": "INTEGER"},
+        "registrations": {
+            "tariff_id": "INTEGER",
+            "tariff_name": "TEXT",
+            "base_price_cents": "INTEGER",
+            "price_cents": "INTEGER",
+        },
+    }.items():
+        cols = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        for name, definition in additions.items():
+            if name not in cols:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    if db.execute("SELECT 1 FROM settings WHERE key='event_configuration_v1'").fetchone():
+        return
+    existing = db.execute("SELECT COUNT(*) FROM tables").fetchone()[0] > 0
+    legacy = existing or any(
+        key in os.environ
+        for key in ("PRICE", "PRICE_STANDARD", "PRICE_INTERNAL", "NUM_TABLES", "SEPA_HOLD_HOURS")
+    )
+    if legacy:
+        standard = money_cents(os.environ.get("PRICE_STANDARD", os.environ.get("PRICE", "15")))
+        internal = money_cents(os.environ.get("PRICE_INTERNAL", str(Decimal(standard) / 100)))
+        hours = bounded_int(os.environ.get("SEPA_HOLD_HOURS", "48"), 1, 8760)
+        db.execute("UPDATE events SET sepa_hold_hours=? WHERE id=?", (hours, event_id))
+        standard_id = db.execute(
+            "INSERT INTO tariffs(event_id,name,amount_cents) VALUES (?, 'Standard', ?)",
+            (event_id, standard),
+        ).lastrowid
+        internal_id = db.execute(
+            "INSERT INTO tariffs(event_id,name,amount_cents,visibility) VALUES (?, 'Intern', ?, 'code')",
+            (event_id, internal),
+        ).lastrowid
+        count = bounded_int(os.environ.get("NUM_TABLES", "0" if existing else "30"), 0, 10000)
+        for number in range(1, count + 1):
+            db.execute(
+                "INSERT OR IGNORE INTO tables(number,event_id) VALUES (?,?)", (number, event_id)
+            )
+        db.execute("UPDATE tables SET tariff_id=? WHERE event_id=?", (standard_id, event_id))
+        db.execute("UPDATE vouchers SET tariff_id=?", (internal_id,))
+        # Freeze legacy deadlines before the global configuration disappears.
+        for row in db.execute(
+            "SELECT id,created_at,payment_method FROM registrations WHERE expires_at IS NULL"
+        ).fetchall():
+            duration = (
+                timedelta(hours=hours) if row[2] == "sepa" else timedelta(minutes=HOLD_MINUTES)
+            )
+            db.execute(
+                "UPDATE registrations SET expires_at=? WHERE id=?",
+                ((datetime.fromisoformat(row[1]) + duration).isoformat(), row[0]),
+            )
+        db.execute(
+            "UPDATE registrations SET tariff_name=CASE WHEN voucher_code IS NULL THEN 'Standard' ELSE 'Intern' END, "
+            "price_cents=CAST(ROUND(price*100) AS INTEGER), base_price_cents=?",
+            (standard,),
+        )
+    db.execute("INSERT INTO settings(key,value) VALUES ('event_configuration_v1','1')")
+
+
+def bounded_int(value, minimum, maximum):
+    try:
+        if len(str(value)) > 10 or not str(value).isdecimal():
+            raise ValueError
+        number = int(value)
+        if not minimum <= number <= maximum:
+            raise ValueError
+        return number
+    except (ValueError, TypeError):
+        raise BadRequest(f"Bitte eine ganze Zahl zwischen {minimum} und {maximum} angeben.")
+
+
+def money_cents(value):
+    try:
+        amount = Decimal(str(value).replace(",", "."))
+        if (
+            not amount.is_finite()
+            or not Decimal("0.01") <= amount <= Decimal("99999.99")
+            or amount != amount.quantize(Decimal("0.01"))
+        ):
+            raise ValueError
+        return int(amount * 100)
+    except (InvalidOperation, ValueError, TypeError):
+        raise BadRequest(
+            "Bitte einen Preis zwischen 0,01 und 99.999,99 mit höchstens zwei Nachkommastellen angeben."
+        )
 
 
 # Called at import time so the schema exists whether the app is started via
@@ -381,6 +486,64 @@ def active_event(db):
 def active_event_id(db):
     row = active_event(db)
     return row["id"] if row else None
+
+
+def event_tariffs(db):
+    return db.execute(
+        "SELECT * FROM tariffs WHERE event_id=? ORDER BY id", (active_event_id(db),)
+    ).fetchall()
+
+
+def tariff_for(db, table, voucher=None):
+    tariff_id = voucher["tariff_id"] if voucher is not None else table["tariff_id"]
+    tariff = db.execute(
+        "SELECT * FROM tariffs WHERE id=? AND event_id=? AND active=1",
+        (tariff_id, active_event_id(db)),
+    ).fetchone()
+    if tariff is None or (voucher is None and tariff["visibility"] != "public"):
+        raise BadRequest("Für diesen Tisch ist kein buchbarer Tarif eingerichtet.")
+    if (
+        not tariff["all_tables"]
+        and not db.execute(
+            "SELECT 1 FROM tariff_tables WHERE tariff_id=? AND table_id=?",
+            (tariff["id"], table["id"]),
+        ).fetchone()
+    ):
+        raise BadRequest("Dieser Tarif gilt nicht für den ausgewählten Tisch.")
+    return tariff
+
+
+def configuration_ready(db):
+    event = active_event(db)
+    if not event or not event["sepa_hold_hours"]:
+        return False
+    if event["payment_cutoff"] and datetime.fromisoformat(event["payment_cutoff"]) <= utcnow():
+        return False
+    tables = db.execute(
+        "SELECT * FROM tables WHERE event_id=? AND active=1", (event["id"],)
+    ).fetchall()
+    if not tables:
+        return False
+    try:
+        for table in tables:
+            tariff_for(db, table)
+    except BadRequest:
+        return False
+    return True
+
+
+def booking_expiry(db, method, created_at):
+    event = active_event(db)
+    expiry = datetime.fromisoformat(created_at) + (
+        timedelta(hours=event["sepa_hold_hours"])
+        if method == "sepa"
+        else timedelta(minutes=HOLD_MINUTES)
+    )
+    if event["payment_cutoff"]:
+        expiry = min(expiry, datetime.fromisoformat(event["payment_cutoff"]))
+    if expiry <= utcnow():
+        raise BadRequest("Die Buchungsfrist ist abgelaufen.")
+    return expiry.isoformat()
 
 
 @contextmanager
@@ -439,9 +602,7 @@ def deadline_for(reg):
     if "expires_at" in reg.keys() and reg["expires_at"]:
         return datetime.fromisoformat(reg["expires_at"])
     duration = (
-        timedelta(hours=SEPA_HOLD_HOURS)
-        if reg["payment_method"] == "sepa"
-        else timedelta(minutes=HOLD_MINUTES)
+        timedelta(hours=48) if reg["payment_method"] == "sepa" else timedelta(minutes=HOLD_MINUTES)
     )
     return datetime.fromisoformat(reg["created_at"]) + duration
 
@@ -947,15 +1108,15 @@ def index():
     faq_items = db.execute("SELECT id, question, answer FROM faq ORDER BY id").fetchall()
     return render_template(
         "index.html",
-        price_standard=PRICE_STANDARD,
-        price_internal=PRICE_INTERNAL,
         currency=CURRENCY,
         paypal_client_id=PAYPAL_CLIENT_ID,
         payment_methods_enabled=ENABLED_PAYMENT_METHODS,
-        sepa_hold_hours=SEPA_HOLD_HOURS,
+        sepa_hold_hours=active_event(db)["sepa_hold_hours"],
         event_title=event_title,
         event_info=event_info,
         faq_items=faq_items,
+        booking_ready=configuration_ready(db),
+        event_id=active_event_id(db),
     )
 
 
@@ -963,8 +1124,25 @@ def index():
 def api_tables():
     db = get_db()
     release_stale_holds(db)
-    rows = db.execute("SELECT number, status FROM tables ORDER BY number").fetchall()
-    return jsonify([{"number": r["number"], "status": r["status"]} for r in rows])
+    rows = db.execute(
+        "SELECT * FROM tables WHERE event_id=? ORDER BY number", (active_event_id(db),)
+    ).fetchall()
+    ready = configuration_ready(db)
+    result = []
+    for row in rows:
+        try:
+            tariff = tariff_for(db, row)
+        except BadRequest:
+            tariff = None
+        result.append(
+            {
+                "number": row["number"],
+                "status": row["status"] if ready and row["active"] and tariff else "disabled",
+                "price": tariff["amount_cents"] / 100 if tariff else None,
+                "tariff_name": tariff["name"] if tariff else None,
+            }
+        )
+    return jsonify(result)
 
 
 @app.route("/api/floorplan-config")
@@ -972,7 +1150,7 @@ def api_floorplan_config():
     db = get_db()
     image = get_setting(db, "floorplan_image")
     rows = db.execute(
-        "SELECT number, pos_x, pos_y FROM tables WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL ORDER BY number"
+        "SELECT number, pos_x, pos_y FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND pos_x IS NOT NULL AND pos_y IS NOT NULL ORDER BY number"
     ).fetchall()
     return jsonify(
         {
@@ -998,7 +1176,17 @@ def api_check_voucher():
     if voucher is None or not voucher["active"] or voucher["used_count"] >= voucher["max_uses"]:
         return jsonify({"valid": False})
 
-    return jsonify({"valid": True, "price": PRICE_INTERNAL})
+    table = db.execute(
+        "SELECT * FROM tables WHERE number=? AND event_id=? AND active=1",
+        (request.args.get("table"), active_event_id(db)),
+    ).fetchone()
+    if table is None:
+        return jsonify(valid=False)
+    try:
+        tariff = tariff_for(db, table, voucher)
+    except BadRequest as exc:
+        return jsonify(valid=False, error=exc.description)
+    return jsonify(valid=True, price=tariff["amount_cents"] / 100, tariff_name=tariff["name"])
 
 
 @app.route("/api/register", methods=["POST"])
@@ -1019,7 +1207,22 @@ def api_register():
     db = get_db()
     release_stale_holds(db)
     with write_transaction(db):
-        table = db.execute("SELECT * FROM tables WHERE number=?", (table_number,)).fetchone()
+        if "event_id" in data and data["event_id"] != active_event_id(db):
+            return (
+                jsonify(error="Die Veranstaltung wurde gewechselt. Bitte die Seite neu laden."),
+                409,
+            )
+        if not configuration_ready(db):
+            return (
+                jsonify(
+                    error="Die Buchung ist noch nicht eingerichtet oder die Buchungsfrist ist abgelaufen."
+                ),
+                409,
+            )
+        table = db.execute(
+            "SELECT * FROM tables WHERE number=? AND event_id=? AND active=1",
+            (table_number, active_event_id(db)),
+        ).fetchone()
         if table is None:
             return jsonify(error="Tisch existiert nicht."), 404
         if table["status"] != "free":
@@ -1033,13 +1236,23 @@ def api_register():
             ):
                 return jsonify(public_booking(existing, table_number))
             return jsonify(error="Dieser Tisch ist leider nicht mehr verfügbar."), 409
-        price, voucher_code = PRICE_STANDARD, None
+        base_tariff = tariff_for(db, table)
+        tariff, voucher_code = base_tariff, None
         if voucher_input:
             voucher, error = reserve_voucher(db, voucher_input)
             if error:
                 raise BadRequest(error)
-            price, voucher_code = PRICE_INTERNAL, voucher["code"]
+            tariff, voucher_code = tariff_for(db, table, voucher), voucher["code"]
+        if (
+            "expected_price" in data
+            and money_cents(data["expected_price"]) != tariff["amount_cents"]
+        ):
+            raise BadRequest(
+                "Der Preis wurde inzwischen geändert. Bitte den Tisch erneut auswählen und den aktuellen Preis prüfen."
+            )
+        price = tariff["amount_cents"] / 100
         now = utcnow().isoformat()
+        expires_at = booking_expiry(db, payment_method, now)
         cur = db.execute(
             "INSERT INTO registrations (name, email, phone, table_id, status, created_at, price, "
             "voucher_code, payment_method, owner_id, create_request_id, capture_request_id, event_id) "
@@ -1070,7 +1283,16 @@ def api_register():
         # Keep the table-only transfer reference chosen for this event.
         reference = f"FLOHMARKT-{table_number}"
         db.execute(
-            "UPDATE registrations SET payment_reference=? WHERE id=?", (reference, registration_id)
+            "UPDATE registrations SET payment_reference=?, expires_at=?, tariff_id=?, tariff_name=?, base_price_cents=?, price_cents=? WHERE id=?",
+            (
+                reference,
+                expires_at,
+                tariff["id"],
+                tariff["name"],
+                base_tariff["amount_cents"],
+                tariff["amount_cents"],
+                registration_id,
+            ),
         )
         reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
         if payment_method == "sepa":
@@ -1105,7 +1327,8 @@ def owned_current_booking(db, registration_id=None):
         return db.execute(
             "SELECT r.*, t.number AS table_number FROM registrations r "
             "JOIN tables t ON t.id=r.table_id WHERE r.owner_id=? AND r.event_id=? "
-            "ORDER BY r.id DESC LIMIT 1", (owner, active_event_id(db))
+            "ORDER BY r.id DESC LIMIT 1",
+            (owner, active_event_id(db)),
         ).fetchone()
     return db.execute(
         "SELECT r.*, t.number AS table_number FROM registrations r "
@@ -1450,23 +1673,28 @@ def admin_dashboard():
     if search:
         term = search.casefold()
         rows = [
-            r for r in rows
-            if any(term in str(r[key] or "").casefold()
-                   for key in ("name", "email", "payment_reference"))
+            r
+            for r in rows
+            if any(
+                term in str(r[key] or "").casefold()
+                for key in ("name", "email", "payment_reference")
+            )
             or term == str(r["table_number"])
         ]
     if booking_filter == "pending":
         rows = [r for r in rows if r["status"] == "pending" and not r["payment_received_at"]]
     elif booking_filter == "review":
         rows = [r for r in rows if r["payment_review"]]
-    stats = db.execute("SELECT status, COUNT(*) AS n FROM tables GROUP BY status").fetchall()
+    stats = db.execute(
+        "SELECT status, COUNT(*) AS n FROM tables WHERE active=1 AND event_id=(SELECT id FROM events WHERE archived_at IS NULL) GROUP BY status"
+    ).fetchall()
     stats = {r["status"]: r["n"] for r in stats}
 
     image = get_setting(db, "floorplan_image")
     plan_tables = db.execute("""
         SELECT number, status, pos_x, pos_y
         FROM tables
-        WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
+        WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND pos_x IS NOT NULL AND pos_y IS NOT NULL
         ORDER BY number
         """).fetchall()
 
@@ -1477,7 +1705,9 @@ def admin_dashboard():
         booking_filter=booking_filter,
         display_deadline=display_deadline,
         stats=stats,
-        num_tables=NUM_TABLES,
+        num_tables=db.execute(
+            "SELECT COUNT(*) FROM tables WHERE event_id=? AND active=1", (active_event_id(db),)
+        ).fetchone()[0],
         currency=CURRENCY,
         floorplan_image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         plan_tables=plan_tables,
@@ -1598,11 +1828,20 @@ def admin_edit_registration(registration_id):
                         ):
                             raise BadRequest("Bitte einen gültigen Zieltisch auswählen.")
                         target = db.execute(
-                            "SELECT * FROM tables WHERE number=?", (int(number),)
+                            "SELECT * FROM tables WHERE number=? AND active=1 AND event_id=?",
+                            (int(number), active_event_id(db)),
                         ).fetchone()
                         if target is None or target["status"] != "free":
                             raise BadRequest(
                                 "Der Zieltisch ist nicht mehr frei. Bitte wähle einen anderen Tisch."
+                            )
+                        target_tariff = tariff_for(db, target)
+                        if (
+                            target_tariff["amount_cents"] != round(reg["price"] * 100)
+                            and request.form.get("keep_price") != "yes"
+                        ):
+                            raise BadRequest(
+                                f"Der Zieltisch kostet regulär {target_tariff['amount_cents'] / 100:.2f} {CURRENCY}. Bitte den Wechsel zum bisherigen Buchungspreis ausdrücklich bestätigen."
                             )
                         db.execute(
                             "UPDATE tables SET status=?, held_at=?, registration_id=? WHERE id=? AND status='free'",
@@ -1651,7 +1890,7 @@ def admin_edit_registration(registration_id):
             deadline=display_deadline(reg),
             currency=CURRENCY,
             free_tables=db.execute(
-                "SELECT number FROM tables WHERE status='free' ORDER BY number"
+                "SELECT t.number, p.amount_cents FROM tables t JOIN tariffs p ON p.id=t.tariff_id WHERE t.status='free' AND t.active=1 AND p.active=1 AND p.visibility='public' AND t.event_id=(SELECT id FROM events WHERE archived_at IS NULL) ORDER BY t.number"
             ).fetchall(),
         ),
         status,
@@ -1702,6 +1941,231 @@ def admin_resolve_payment(registration_id):
     return redirect(url_for("admin_dashboard"))
 
 
+@app.route("/admin/pricing", methods=["GET", "POST"])
+@login_required
+def admin_pricing():
+    db = get_db()
+    if request.method == "POST":
+        try:
+            with write_transaction(db):
+                event = active_event(db)
+                if request.form.get("event_id") != str(event["id"]):
+                    raise BadRequest(
+                        "Die Veranstaltung wurde gewechselt. Bitte die Seite neu laden."
+                    )
+                action = request.form.get("action")
+                if action == "deadline":
+                    duration = bounded_int(request.form.get("duration"), 1, 8760)
+                    unit = request.form.get("unit")
+                    if unit not in ("hours", "days"):
+                        raise BadRequest("Ungültige Zeiteinheit.")
+                    hours = duration * (24 if unit == "days" else 1)
+                    if hours > 8760:
+                        raise BadRequest("Die Frist darf höchstens 365 Tage betragen.")
+                    cutoff = request.form.get("cutoff", "").strip()
+                    if cutoff:
+                        try:
+                            local = datetime.fromisoformat(cutoff)
+                            if local.tzinfo is not None:
+                                raise ValueError
+                            cutoff = (
+                                local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
+                                .astimezone(timezone.utc)
+                                .replace(tzinfo=None)
+                            )
+                            if cutoff <= utcnow():
+                                raise ValueError
+                        except ValueError:
+                            raise BadRequest(
+                                "Bitte einen zukünftigen Termin in deutscher Ortszeit angeben."
+                            )
+                        cutoff = cutoff.isoformat()
+                    db.execute(
+                        "UPDATE events SET sepa_hold_hours=?,payment_cutoff=? WHERE id=?",
+                        (hours, cutoff or None, event["id"]),
+                    )
+                elif action == "tariff":
+                    name = text_field(request.form, "name", 80, required=True)
+                    cents = money_cents(request.form.get("price"))
+                    visibility = request.form.get("visibility")
+                    if visibility not in ("public", "code"):
+                        raise BadRequest("Ungültige Verfügbarkeit.")
+                    active = int(request.form.get("active") == "yes")
+                    if request.form.get("scope") not in ("all", "selected"):
+                        raise BadRequest("Ungültige Tarifgültigkeit.")
+                    all_tables = int(request.form.get("scope") == "all")
+                    numbers = {
+                        bounded_int(n, 1, 2147483647) for n in request.form.getlist("table_ids")
+                    }
+                    valid_ids = {
+                        row[0]
+                        for row in db.execute(
+                            "SELECT id FROM tables WHERE event_id=?", (event["id"],)
+                        )
+                    }
+                    if not numbers <= valid_ids or (not all_tables and not numbers):
+                        raise BadRequest(
+                            "Bitte mindestens einen gültigen Tisch auswählen oder 'Alle Tische' verwenden."
+                        )
+                    tariff_id = request.form.get("tariff_id")
+                    if tariff_id:
+                        if not db.execute(
+                            "SELECT 1 FROM tariffs WHERE id=? AND event_id=?",
+                            (tariff_id, event["id"]),
+                        ).fetchone():
+                            raise BadRequest("Tarif nicht gefunden.")
+                        db.execute(
+                            "UPDATE tariffs SET name=?,amount_cents=?,visibility=?,active=?,all_tables=? WHERE id=?",
+                            (name, cents, visibility, active, all_tables, tariff_id),
+                        )
+                    else:
+                        tariff_id = db.execute(
+                            "INSERT INTO tariffs(event_id,name,amount_cents,visibility,active,all_tables) VALUES (?,?,?,?,?,?)",
+                            (event["id"], name, cents, visibility, active, all_tables),
+                        ).lastrowid
+                    db.execute("DELETE FROM tariff_tables WHERE tariff_id=?", (tariff_id,))
+                    if not all_tables:
+                        db.executemany(
+                            "INSERT INTO tariff_tables(tariff_id,table_id) VALUES (?,?)",
+                            [(tariff_id, n) for n in numbers],
+                        )
+                    if visibility == "public" and request.form.get("assign") == "yes":
+                        targets = valid_ids if all_tables else numbers
+                        db.executemany(
+                            "UPDATE tables SET tariff_id=? WHERE id=?",
+                            [(tariff_id, n) for n in targets],
+                        )
+                else:
+                    raise BadRequest("Unbekannte Aktion.")
+            flash(
+                "Einstellungen gespeichert. Bestehende Buchungspreise und Fristen bleiben erhalten."
+            )
+            return redirect(url_for("admin_pricing"))
+        except (BadRequest, sqlite3.IntegrityError) as exc:
+            flash_error(
+                exc.description
+                if isinstance(exc, BadRequest)
+                else "Dieser Tarifname existiert bereits."
+            )
+            # Show submitted data on errors, including new tariff forms.
+            return render_pricing(db), 400
+    return render_pricing(db)
+
+
+def render_pricing(db):
+    event = active_event(db)
+    cutoff = (
+        (
+            datetime.fromisoformat(event["payment_cutoff"])
+            .replace(tzinfo=timezone.utc)
+            .astimezone(ZoneInfo("Europe/Berlin"))
+            .strftime("%Y-%m-%dT%H:%M")
+        )
+        if event["payment_cutoff"]
+        else ""
+    )
+    assignments = {}
+    for row in db.execute("SELECT tariff_id,table_id FROM tariff_tables"):
+        assignments.setdefault(row[0], []).append(row[1])
+    return render_template(
+        "admin_pricing.html",
+        event=event,
+        tariffs=event_tariffs(db),
+        tables=db.execute(
+            "SELECT * FROM tables WHERE event_id=? ORDER BY number", (event["id"],)
+        ).fetchall(),
+        assignments=assignments,
+        ready=configuration_ready(db),
+        cutoff=cutoff,
+        currency=CURRENCY,
+    )
+
+
+@app.route("/admin/tables", methods=["POST"])
+@login_required
+def admin_tables():
+    db = get_db()
+    try:
+        with write_transaction(db):
+            event_id = active_event_id(db)
+            if request.form.get("event_id") != str(event_id):
+                raise BadRequest("Die Veranstaltung wurde gewechselt. Bitte die Seite neu laden.")
+            action = request.form.get("action")
+            if action == "add":
+                start = bounded_int(request.form.get("start"), 1, 2147483647)
+                end = bounded_int(
+                    request.form.get("end") or str(start), start, min(start + 999, 2147483647)
+                )
+                tariff_id = request.form.get("tariff_id") or None
+                if (
+                    tariff_id
+                    and not db.execute(
+                        "SELECT 1 FROM tariffs WHERE id=? AND event_id=? AND visibility='public' AND all_tables=1",
+                        (tariff_id, event_id),
+                    ).fetchone()
+                ):
+                    raise BadRequest("Bitte einen öffentlichen Tarif für alle Tische auswählen.")
+                for number in range(start, end + 1):
+                    db.execute(
+                        "INSERT INTO tables(number,event_id,tariff_id) VALUES (?,?,?)",
+                        (number, event_id, tariff_id),
+                    )
+            elif action in ("edit", "delete"):
+                table = db.execute(
+                    "SELECT * FROM tables WHERE id=? AND event_id=?",
+                    (request.form.get("table_id"), event_id),
+                ).fetchone()
+                if table is None:
+                    raise BadRequest("Tisch nicht gefunden.")
+                referenced = db.execute(
+                    "SELECT 1 FROM registrations WHERE table_id=? LIMIT 1", (table["id"],)
+                ).fetchone()
+                if action == "delete":
+                    if referenced or table["status"] != "free":
+                        raise BadRequest(
+                            "Tische mit Buchungshistorie können nur deaktiviert werden, sobald sie frei sind."
+                        )
+                    db.execute("DELETE FROM tariff_tables WHERE table_id=?", (table["id"],))
+                    db.execute("DELETE FROM tables WHERE id=?", (table["id"],))
+                else:
+                    number = bounded_int(request.form.get("number"), 1, 2147483647)
+                    active = int(request.form.get("active") == "yes")
+                    if (number != table["number"] and referenced) or (
+                        not active and table["status"] != "free"
+                    ):
+                        raise BadRequest(
+                            "Tische mit Buchungshistorie dürfen nicht umnummeriert, belegte Tische nicht deaktiviert werden."
+                        )
+                    tariff_id = request.form.get("tariff_id") or None
+                    if tariff_id:
+                        tariff = db.execute(
+                            "SELECT * FROM tariffs WHERE id=? AND event_id=? AND visibility='public'",
+                            (tariff_id, event_id),
+                        ).fetchone()
+                        if not tariff or (
+                            not tariff["all_tables"]
+                            and not db.execute(
+                                "SELECT 1 FROM tariff_tables WHERE tariff_id=? AND table_id=?",
+                                (tariff_id, table["id"]),
+                            ).fetchone()
+                        ):
+                            raise BadRequest("Dieser öffentliche Tarif gilt nicht für den Tisch.")
+                    db.execute(
+                        "UPDATE tables SET number=?,active=?,tariff_id=? WHERE id=?",
+                        (number, active, tariff_id, table["id"]),
+                    )
+            else:
+                raise BadRequest("Unbekannte Aktion.")
+        flash("Tischverwaltung gespeichert.")
+    except (BadRequest, sqlite3.IntegrityError) as exc:
+        flash_error(
+            exc.description
+            if isinstance(exc, BadRequest)
+            else "Mindestens eine Tischnummer existiert bereits. Es wurde nichts geändert."
+        )
+    return redirect(url_for("admin_floorplan"))
+
+
 @app.route("/admin/vouchers", methods=["GET", "POST"])
 @login_required
 def admin_vouchers():
@@ -1709,6 +2173,15 @@ def admin_vouchers():
 
     if request.method == "POST":
         action = request.form.get("action")
+        tariff_id = request.form.get("tariff_id")
+        if action in ("create", "bulk_generate"):
+            tariff = db.execute(
+                "SELECT * FROM tariffs WHERE id=? AND event_id=? AND active=1 AND visibility='code'",
+                (tariff_id, active_event_id(db)),
+            ).fetchone()
+            if tariff is None:
+                flash_error("Bitte einen aktiven Gutscheintarif auswählen.")
+                return redirect(url_for("admin_vouchers"))
 
         if action == "create":
             code = (request.form.get("code") or "").strip()
@@ -1721,9 +2194,9 @@ def admin_vouchers():
             else:
                 try:
                     db.execute(
-                        "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
-                        "VALUES (?, ?, 0, 1, ?)",
-                        (code, max_uses, utcnow().isoformat()),
+                        "INSERT INTO vouchers (code, max_uses, used_count, active, created_at, tariff_id) "
+                        "VALUES (?, ?, 0, 1, ?, ?)",
+                        (code, max_uses, utcnow().isoformat(), tariff_id),
                     )
                     db.commit()
                     flash(f"Gutscheincode „{code}“ wurde angelegt.")
@@ -1742,9 +2215,9 @@ def admin_vouchers():
                     code = f"{prefix}-{secrets.token_hex(4).upper()}"
                     try:
                         db.execute(
-                            "INSERT INTO vouchers (code, max_uses, used_count, active, created_at) "
-                            "VALUES (?, 1, 0, 1, ?)",
-                            (code, utcnow().isoformat()),
+                            "INSERT INTO vouchers (code, max_uses, used_count, active, created_at, tariff_id) "
+                            "VALUES (?, 1, 0, 1, ?, ?)",
+                            (code, utcnow().isoformat(), tariff_id),
                         )
                         created.append(code)
                         break
@@ -1771,12 +2244,13 @@ def admin_vouchers():
 
         return redirect(url_for("admin_vouchers"))
 
-    vouchers = db.execute("SELECT * FROM vouchers ORDER BY created_at DESC").fetchall()
+    vouchers = db.execute(
+        "SELECT v.*, p.name AS tariff_name FROM vouchers v LEFT JOIN tariffs p ON p.id=v.tariff_id ORDER BY v.created_at DESC"
+    ).fetchall()
     return render_template(
         "admin_vouchers.html",
         vouchers=vouchers,
-        price_standard=PRICE_STANDARD,
-        price_internal=PRICE_INTERNAL,
+        tariffs=[t for t in event_tariffs(db) if t["visibility"] == "code" and t["active"]],
         currency=CURRENCY,
     )
 
@@ -1812,7 +2286,7 @@ def admin_emails():
         sepa_body=sepa_body,
         reminder_subject=reminder_subject,
         reminder_body=reminder_body,
-        sepa_hold_hours=SEPA_HOLD_HOURS,
+        sepa_hold_hours=active_event(db)["sepa_hold_hours"],
     )
 
 
@@ -1893,7 +2367,17 @@ def admin_faq():
 # ---------------------------------------------------------------------------
 # What the admin can carry over into the new event. Everything not listed here
 # is always reset, because it belongs to the event that just ended.
-CARRY_OVER_OPTIONS = ("floorplan", "positions", "page", "faq", "emails", "vouchers")
+CARRY_OVER_OPTIONS = (
+    "floorplan",
+    "positions",
+    "page",
+    "faq",
+    "emails",
+    "vouchers",
+    "tariffs",
+    "deadlines",
+    "tables",
+)
 
 ARCHIVED_IMAGE_PATTERN = re.compile(r"floorplan-event\d+\.[a-z0-9]{1,5}")
 
@@ -1917,14 +2401,22 @@ def build_event_snapshot(db, event_id, floorplan_image):
     ).fetchone()
     plan_tables = db.execute(
         "SELECT number, pos_x, pos_y FROM tables "
-        "WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL ORDER BY number"
+        "WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND pos_x IS NOT NULL AND pos_y IS NOT NULL ORDER BY number"
     ).fetchall()
     faq_items = db.execute("SELECT question, answer FROM faq ORDER BY id").fetchall()
     return {
         "event_title": get_setting(db, "event_title", DEFAULT_EVENT_TITLE),
         "event_info": get_setting(db, "event_info", DEFAULT_EVENT_INFO),
         "floorplan_image": floorplan_image,
-        "num_tables": NUM_TABLES,
+        "num_tables": db.execute(
+            "SELECT COUNT(*) FROM tables WHERE event_id=?", (event_id,)
+        ).fetchone()[0],
+        "tariffs": [dict(t) for t in event_tariffs(db)],
+        "sepa_hold_hours": active_event(db)["sepa_hold_hours"],
+        "payment_cutoff": active_event(db)["payment_cutoff"],
+        "inventory": [
+            dict(t) for t in db.execute("SELECT * FROM tables WHERE event_id=?", (event_id,))
+        ],
         "currency": CURRENCY,
         "tables": [dict(row) for row in plan_tables],
         "faq": [dict(row) for row in faq_items],
@@ -1954,6 +2446,10 @@ def archive_event(db, archive_name, new_name, keep):
             archived_image = candidate
 
     with write_transaction(db):
+        if active_event_id(db) != event["id"]:
+            raise BadRequest(
+                "Die Veranstaltung wurde inzwischen archiviert. Bitte die Seite neu laden."
+            )
         # Nothing may stay reserved or trigger a reminder for a finished event.
         pending = db.execute(
             "SELECT * FROM registrations WHERE status='pending' AND event_id=?",
@@ -1973,9 +2469,6 @@ def archive_event(db, archive_name, new_name, keep):
             (archive_name, now, json.dumps(snapshot, ensure_ascii=False), event["id"]),
         )
 
-        db.execute("UPDATE tables SET status='free', held_at=NULL, registration_id=NULL")
-        if "positions" not in keep:
-            db.execute("UPDATE tables SET pos_x=NULL, pos_y=NULL")
         if "floorplan" not in keep:
             db.execute("DELETE FROM settings WHERE key='floorplan_image'")
         if "page" not in keep:
@@ -1990,7 +2483,56 @@ def archive_event(db, archive_name, new_name, keep):
         else:
             db.execute("DELETE FROM vouchers")
 
-        db.execute("INSERT INTO events (name, created_at) VALUES (?, ?)", (new_name, now))
+        new_id = db.execute(
+            "INSERT INTO events (name, created_at, sepa_hold_hours) VALUES (?, ?, ?)",
+            (new_name, now, event["sepa_hold_hours"] if "deadlines" in keep else None),
+        ).lastrowid
+        tariff_map, table_map = {}, {}
+        if "tariffs" in keep:
+            for tariff in db.execute(
+                "SELECT * FROM tariffs WHERE event_id=?", (event["id"],)
+            ).fetchall():
+                tariff_map[tariff["id"]] = db.execute(
+                    "INSERT INTO tariffs(event_id,name,amount_cents,visibility,active,all_tables) VALUES (?,?,?,?,?,?)",
+                    (
+                        new_id,
+                        tariff["name"],
+                        tariff["amount_cents"],
+                        tariff["visibility"],
+                        tariff["active"],
+                        tariff["all_tables"],
+                    ),
+                ).lastrowid
+        if "tables" in keep:
+            for table in db.execute(
+                "SELECT * FROM tables WHERE event_id=?", (event["id"],)
+            ).fetchall():
+                table_map[table["id"]] = db.execute(
+                    "INSERT INTO tables(number,event_id,active,tariff_id,pos_x,pos_y) VALUES (?,?,?,?,?,?)",
+                    (
+                        table["number"],
+                        new_id,
+                        table["active"],
+                        tariff_map.get(table["tariff_id"]),
+                        table["pos_x"] if "positions" in keep else None,
+                        table["pos_y"] if "positions" in keep else None,
+                    ),
+                ).lastrowid
+        for old_id, new_tariff in tariff_map.items():
+            for row in db.execute(
+                "SELECT table_id FROM tariff_tables WHERE tariff_id=?", (old_id,)
+            ).fetchall():
+                if row[0] in table_map:
+                    db.execute(
+                        "INSERT INTO tariff_tables VALUES (?,?)", (new_tariff, table_map[row[0]])
+                    )
+        if "vouchers" in keep:
+            for voucher in db.execute("SELECT id,tariff_id FROM vouchers").fetchall():
+                new_tariff = tariff_map.get(voucher["tariff_id"])
+                db.execute(
+                    "UPDATE vouchers SET tariff_id=?,active=CASE WHEN ? IS NULL THEN 0 ELSE active END WHERE id=?",
+                    (new_tariff, new_tariff, voucher["id"]),
+                )
 
     if "floorplan" not in keep and current_image:
         old_path = os.path.join(UPLOAD_FOLDER, current_image)
@@ -2068,10 +2610,14 @@ def admin_event():
             "SELECT COUNT(*) FROM registrations WHERE event_id=? AND status!='cancelled'",
             (event["id"],),
         ).fetchone()[0],
-        booked=db.execute("SELECT COUNT(*) FROM tables WHERE status='booked'").fetchone()[0],
-        held=db.execute("SELECT COUNT(*) FROM tables WHERE status='held'").fetchone()[0],
+        booked=db.execute(
+            "SELECT COUNT(*) FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND status='booked'"
+        ).fetchone()[0],
+        held=db.execute(
+            "SELECT COUNT(*) FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND status='held'"
+        ).fetchone()[0],
         positions=db.execute(
-            "SELECT COUNT(*) FROM tables WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL"
+            "SELECT COUNT(*) FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND pos_x IS NOT NULL AND pos_y IS NOT NULL"
         ).fetchone()[0],
         faq=db.execute("SELECT COUNT(*) FROM faq").fetchone()[0],
         vouchers=db.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0],
@@ -2149,12 +2695,14 @@ def admin_floorplan():
 
     image = get_setting(db, "floorplan_image")
     tables = db.execute(
-        "SELECT number, status, pos_x, pos_y FROM tables ORDER BY number"
+        "SELECT * FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) ORDER BY number"
     ).fetchall()
     return render_template(
         "admin_floorplan.html",
         image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         tables=tables,
+        tariffs=event_tariffs(db),
+        event=active_event(db),
     )
 
 
@@ -2169,7 +2717,10 @@ def admin_set_position():
         raise BadRequest("Positionen müssen Zahlen zwischen 0 und 100 sein.")
 
     db = get_db()
-    db.execute("UPDATE tables SET pos_x=?, pos_y=? WHERE number=?", (x, y, number))
+    db.execute(
+        "UPDATE tables SET pos_x=?, pos_y=? WHERE number=? AND event_id=(SELECT id FROM events WHERE archived_at IS NULL)",
+        (x, y, number),
+    )
     db.commit()
     return jsonify({"ok": True})
 
@@ -2181,7 +2732,10 @@ def admin_clear_position():
     number = positive_id(data, "number")
 
     db = get_db()
-    db.execute("UPDATE tables SET pos_x=NULL, pos_y=NULL WHERE number=?", (number,))
+    db.execute(
+        "UPDATE tables SET pos_x=NULL, pos_y=NULL WHERE number=? AND event_id=(SELECT id FROM events WHERE archived_at IS NULL)",
+        (number,),
+    )
     db.commit()
     return jsonify({"ok": True})
 

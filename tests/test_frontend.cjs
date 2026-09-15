@@ -26,7 +26,7 @@ function harness(respond) {
     console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {},
     matchMedia: () => ({matches: false}),
     document: {
-      body: {dataset: {priceStandard: '15', priceInternal: '10', currency: 'EUR'}},
+      body: {dataset: {eventId: '1', currency: 'EUR'}},
       getElementById: element,
       createElement: () => element('created'),
       querySelector: selector => selector.includes('csrf-token') ? {content: 'test-csrf-token'} : {value: 'paypal'},
@@ -50,7 +50,7 @@ function harness(respond) {
     await element('reg-form').listeners.submit({preventDefault() {}});
     await new Promise(resolve => setImmediate(resolve));
   }
-  return {element, calls, register, approve: () => callbacks.onApprove({orderID: 'ORDER123'})};
+  return {element, calls, register, evaluate: source => vm.runInContext(source, context), approve: () => callbacks.onApprove({orderID: 'ORDER123'})};
 }
 const booking = {
   registration_id: 1, table: 1, price: 15, currency: 'EUR', payment_method: 'paypal', status: 'pending',
@@ -116,4 +116,22 @@ test('failed registration restores submit and offers another table', async () =>
   assert.equal(ui.element('form-error').textContent, 'Table unavailable');
   assert.equal(ui.element('choose-another-table').hidden, false);
   assert.equal(ui.element('step-pay').hidden, true);
+});
+
+
+test('per-table prices and voucher quotes drive the checkout amount', async () => {
+  const ui = harness(url => url.startsWith('/api/check-voucher?') ?
+    {status: 200, body: {valid: true, price: 7.5, tariff_name: 'Mitglieder'}} : null);
+  await new Promise(resolve => setImmediate(resolve));
+  ui.evaluate("tables = [{number:1,status:'free',price:22.5},{number:2,status:'free',price:30}]; selectTable(1)");
+  assert.match(ui.element('live-price-label').textContent, /22,50/);
+  ui.element('voucher').value = 'MEMBER';
+  ui.element('voucher').listeners.input();
+  await new Promise(resolve => setTimeout(resolve, 450));
+  assert.match(ui.element('live-price-label').textContent, /7,50/);
+  assert.ok(ui.calls.some(call => call.url.includes('code=MEMBER&table=1')));
+  ui.evaluate('selectTable(2)');
+  assert.equal(ui.element('voucher').value, '');
+  assert.match(ui.element('live-price-label').textContent, /30,00/);
+  assert.equal(ui.element('summary-discount-row').hidden, true);
 });

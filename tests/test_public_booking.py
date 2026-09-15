@@ -30,7 +30,7 @@ def test_booking_recovery_is_bound_to_browser_owner(mod):
 def test_repeated_registration_recovers_without_duplicate_email_or_voucher(mod):
     client, headers = client_for(mod)
     with connect(mod) as db:
-        db.execute("INSERT INTO vouchers (code,max_uses,used_count,active,created_at) VALUES ('ONCE',1,0,1,?)", (mod.utcnow().isoformat(),))
+        db.execute("INSERT INTO vouchers (code,max_uses,used_count,active,created_at,tariff_id) VALUES ('ONCE',1,0,1,?,2)", (mod.utcnow().isoformat(),))
     first = register(client, headers, payment_method='sepa', voucher='ONCE').json
     second = register(client, headers, payment_method='sepa', voucher='ONCE').json
     assert second['registration_id'] == first['registration_id']

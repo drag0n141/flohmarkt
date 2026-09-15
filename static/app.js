@@ -3,8 +3,7 @@
 const byId = id => document.getElementById(id);
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const config = {
-  priceStandard: Number(document.body.dataset.priceStandard),
-  priceInternal: Number(document.body.dataset.priceInternal),
+  eventId: Number(document.body.dataset.eventId),
   currency: document.body.dataset.currency,
 };
 const money = (amount, currency = config.currency) => new Intl.NumberFormat('de-DE', {
@@ -17,6 +16,7 @@ let tables = [];
 let floorplan = null;
 let tableView = 'plan';
 let voucherValid = false;
+let voucherPrice = null;
 let voucherGeneration = 0;
 let voucherTimer;
 let countdownTimer;
@@ -78,11 +78,12 @@ function showStep(step, focus = true) {
 
 function updateSummary() {
   const method = document.querySelector('input[name="payment_method"]:checked').value;
-  byId('summary-standard').textContent = money(config.priceStandard);
+  const basePrice = tables.find(table => table.number === selectedTable)?.price ?? 0;
+  byId('summary-standard').textContent = money(basePrice);
   byId('summary-method').textContent = method === 'paypal' ? 'PayPal' : 'Überweisung';
   byId('summary-discount-row').hidden = !voucherValid;
-  byId('summary-discount').textContent = money(config.priceStandard - config.priceInternal);
-  byId('live-price-label').textContent = money(voucherValid ? config.priceInternal : config.priceStandard);
+  byId('summary-discount').textContent = money(basePrice - voucherPrice);
+  byId('live-price-label').textContent = money(voucherValid ? voucherPrice : basePrice);
   byId('submit-booking').textContent = method === 'paypal' ? 'Weiter zu PayPal' : 'Kostenpflichtig reservieren';
 }
 
@@ -94,11 +95,11 @@ function tableButton(table, isMarker) {
   const status = statusLabels[table.status] || 'nicht verfügbar';
   button.textContent = isMarker ? String(table.number) : `Tisch ${table.number}`;
   button.setAttribute('aria-label', `Tisch ${table.number}, ${status}`);
-  button.title = `Tisch ${table.number}, ${status}`;
+  button.title = `Tisch ${table.number}, ${status}${table.price != null ? ', ' + money(table.price) : ''}`;
   button.disabled = table.status !== 'free';
   if (!isMarker) {
     const label = document.createElement('small');
-    label.textContent = status;
+    label.textContent = status + (table.price != null ? ' · ' + money(table.price) : '');
     button.appendChild(label);
   }
   button.addEventListener('click', () => selectTable(table.number));
@@ -166,6 +167,12 @@ async function refreshTables() {
 
 function selectTable(number) {
   selectedTable = number;
+  ++voucherGeneration;
+  clearTimeout(voucherTimer);
+  voucherValid = false;
+  voucherPrice = null;
+  byId('voucher').value = '';
+  byId('voucher-feedback').textContent = '';
   byId('selected-table-label').textContent = String(number);
   byId('form-error').textContent = '';
   byId('choose-another-table').hidden = true;
@@ -202,10 +209,11 @@ byId('voucher').addEventListener('input', () => {
   if (!code) return;
   voucherTimer = setTimeout(async () => {
     try {
-      const data = await apiFetch('/api/check-voucher?code=' + encodeURIComponent(code));
+      const data = await apiFetch('/api/check-voucher?code=' + encodeURIComponent(code) + '&table=' + encodeURIComponent(selectedTable));
       if (generation !== voucherGeneration) return;
       voucherValid = data.valid;
-      feedback.textContent = data.valid ? 'Gutschein gültig – Mitgliederrabatt wird angewendet.' : 'Dieser Gutscheincode ist ungültig oder bereits aufgebraucht.';
+      voucherPrice = data.valid ? data.price : null;
+      feedback.textContent = data.valid ? `Gutschein gültig – Tarif ${data.tariff_name} wird angewendet.` : 'Dieser Gutscheincode ist ungültig oder bereits aufgebraucht.';
       feedback.className = data.valid ? 'hint success' : 'hint error-text';
     } catch (error) {
       if (generation !== voucherGeneration) return;
@@ -279,6 +287,8 @@ byId('reg-form').addEventListener('submit', async event => {
       email: byId('email').value,
       phone: byId('phone').value,
       table: selectedTable,
+      event_id: config.eventId,
+      expected_price: voucherValid ? voucherPrice : (tables.find(table => table.number === selectedTable)?.price ?? 0),
       voucher: byId('voucher').value,
       payment_method: document.querySelector('input[name="payment_method"]:checked').value,
     });

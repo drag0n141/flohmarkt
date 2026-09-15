@@ -4,7 +4,7 @@ A small Flask web app for allocating tables at a flea market: visitors
 register, pick a free table (either from a simple grid or an optional
 uploaded floor plan with clickable markers), and pay the table fee — either
 directly via PayPal (server-side Orders API v2, table booked immediately on
-payment) or via bank transfer (SEPA), where the table is held for 48 hours
+payment) or via bank transfer (SEPA), where the table is held for the configured payment period
 until an admin manually confirms the incoming payment. Which of the two
 payment methods are actually offered is configurable (see `PAYMENT_METHODS`
 below). Unpaid PayPal holds expire automatically after 10 minutes.
@@ -38,16 +38,12 @@ and a reverse proxy with HTTPS — HTTPS is required for live PayPal payments.
 
 | Variable | Description | Default |
 |---|---|---|
-| `NUM_TABLES` | Number of tables to create (raising this and restarting adds the new tables) | `30` |
-| `PRICE_STANDARD` | Regular table fee | `15.00` |
-| `PRICE_INTERNAL` | Discounted fee applied with a valid voucher code | same as `PRICE_STANDARD` |
 | `CURRENCY` | ISO currency code for PayPal | `EUR` |
 | `PAYMENT_METHODS` | Which payment methods to offer: `paypal,sepa`, `sepa`, or `paypal`; invalid/empty falls back to both | `paypal,sepa` |
 | `PAYPAL_CLIENT_ID` | PayPal REST app Client ID | — |
 | `PAYPAL_CLIENT_SECRET` | PayPal REST app Secret | — |
 | `PAYPAL_MODE` | `sandbox` or `live` | `sandbox` |
 | `PAYPAL_WEBHOOK_ID` | Enables the `/webhooks/paypal` fallback (see below); leave empty to disable | — |
-| `SEPA_HOLD_HOURS` | How long a bank-transfer reservation holds a table before it expires unconfirmed | `48` |
 | `DB_PATH` | Path to the SQLite database file | `flohmarkt.db` |
 | `ADMIN_PASSWORD` | Password for `/admin` | — |
 | `SECRET_KEY` | Required random session secret, at least 32 characters; unsafe values fail startup (generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`) | — |
@@ -81,7 +77,7 @@ Kubernetes) and restarting the app.
 
 At registration, visitors choose between PayPal and bank transfer (if both
 are enabled — see above). Bank transfer:
-1. Holds the table for `SEPA_HOLD_HOURS` (default 48h) instead of the
+1. Holds the table for the payment deadline configured under **Preise & Fristen** instead of the
    10-minute PayPal hold.
 2. Queues an email for background delivery with the bank details, amount, and a payment
    reference (`FLOHMARKT-<table number>`) so incoming transfers can be
@@ -94,7 +90,7 @@ are enabled — see above). Bank transfer:
    another visitor's table.
 
 If the transfer never arrives, the reservation and table are released
-automatically once `SEPA_HOLD_HOURS` has passed, same as an expired PayPal
+automatically once the stored reservation deadline has passed, same as an expired PayPal
 hold.
 
 ## Editable emails
@@ -158,8 +154,7 @@ the registration is cancelled. `Klärung erledigt` only marks the review complet
 it never issues a refund. Refunds or alternative allocations must be arranged
 outside this application.
 
-SEPA reservations still start immediately and last `SEPA_HOLD_HOURS` (48 hours
-by default). This update does not add email verification, CAPTCHA, or additional
+SEPA reservations still start immediately and last for the configured payment period. This update does not add email verification, CAPTCHA, or additional
 reservation limits.
 
 ## Email outbox
@@ -345,3 +340,57 @@ Startup adds an `events` table and a nullable `registrations.event_id` column.
 Existing databases receive one active event retroactively, dated to the oldest
 registration, and all existing registrations are assigned to it, so nothing
 disappears behind the archive filter after an upgrade.
+
+
+## Event prices, deadlines and table inventory
+
+Configure business settings in the admin portal without restarting the container:
+
+- **Preise & Fristen** (`/admin/pricing`): any number of named tariffs, prices in
+  the configured currency, public or code-only access, active/inactive, and scope
+  covering all tables (including future additions) or selected tables. Each table
+  has one public tariff; a voucher unlocks its assigned code tariff. Prices must
+  be between 0.01 and 99,999.99, with at most two decimal places.
+- **Gutscheine**: assign a code tariff when creating individual or bulk codes.
+  Restricted tariffs are validated for the selected table on both preview and
+  reservation. Fixed/percentage discount rules are not part of this version.
+- **Preise & Fristen**: bank-transfer duration in hours or days, optionally capped
+  by a fixed deadline in Europe/Berlin time. The cap also closes new bookings and
+  caps PayPal's ten-minute hold. Existing bookings keep their stored deadlines;
+  individual extensions remain available.
+- **Tische & Lageplan**: add individual tables or ranges of up to 1,000, assign
+  public tariffs, change unused numbers, deactivate free tables, and remove
+  tables that have no booking history. Plan placement remains in the same page.
+  Counts are derived from the database; restarts never recreate deleted tables.
+
+A fresh installation starts without `PRICE`, `PRICE_STANDARD`, `PRICE_INTERNAL`,
+`SEPA_HOLD_HOURS` or `NUM_TABLES`. Public booking stays unavailable until a payment
+period and at least one active table are configured, and all active tables have
+valid public tariffs. Infrastructure settings such as `SECRET_KEY`, SMTP and
+PayPal credentials remain environment variables.
+
+### Upgrading an existing installation
+
+On the first start after upgrading, an atomic, idempotent migration imports the
+existing environment values and table inventory into event configuration. Leave
+legacy environment values in place for this first start to preserve customized
+prices and deadlines; remove them after successful migration. If an existing
+installation has no legacy environment values, the former application defaults
+are used (standard 15.00, internal equal to standard, 48 hours), while existing
+tables are preserved. A new installation with legacy environment values is also
+supported. Once migrated, all subsequent starts ignore these environment values,
+even when they remain in the deployment or contain invalid values.
+
+The migration freezes existing prices and derived deadlines. New bookings store
+tariff name and exact amounts in cents as well as the existing payment amount.
+Price changes between selection and submission require the visitor to review the
+new price. Moving an existing booking to a differently priced table requires an
+explicit confirmation to retain its agreed price; it does not charge or refund
+a difference automatically.
+
+When archiving and starting a new event, independently choose whether to copy
+**tariffs**, **payment duration**, and **table inventory**, alongside the existing
+content and plan options. A fixed cutoff is never copied. Table identities and
+pricing records are separate per event, so later renumbering cannot change old
+bookings. Copied vouchers are disabled if their tariff was not copied. Archives
+retain a snapshot of prices, deadlines and the complete table inventory.

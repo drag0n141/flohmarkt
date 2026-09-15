@@ -20,6 +20,10 @@ def mod(tmp_path, monkeypatch):
     monkeypatch.setenv("DISABLE_BACKGROUND_TASKS", "true")
     monkeypatch.setenv("DB_PATH", str(tmp_path / "bookings.db"))
     monkeypatch.setenv("SMTP_HOST", "")
+    monkeypatch.setenv("NUM_TABLES", "30")
+    monkeypatch.setenv("PRICE_STANDARD", "15")
+    monkeypatch.setenv("PRICE_INTERNAL", "15")
+    monkeypatch.setenv("SEPA_HOLD_HOURS", "48")
     app = importlib.import_module("app")
     monkeypatch.setattr(app, "DB_PATH", str(tmp_path / "bookings.db"))
     monkeypatch.setattr(app, "SMTP_HOST", "")
@@ -111,7 +115,9 @@ def test_parallel_reservation_has_one_winner(mod):
 
 def test_parallel_voucher_is_used_once(mod):
     with connect(mod) as db:
-        db.execute("INSERT INTO vouchers(code,max_uses,created_at) VALUES('SINGLE',1,'2026-01-01')")
+        db.execute(
+            "INSERT INTO vouchers(code,max_uses,created_at,tariff_id) VALUES('SINGLE',1,'2026-01-01',2)"
+        )
     clients = [client_for(mod) for _ in range(2)]
     barrier = threading.Barrier(2)
 
@@ -129,7 +135,9 @@ def test_parallel_voucher_is_used_once(mod):
 def test_registration_rolls_back_voucher_and_table_if_queue_fails(mod, monkeypatch):
     client, headers = client_for(mod)
     with connect(mod) as db:
-        db.execute("INSERT INTO vouchers(code,max_uses,created_at) VALUES('SINGLE',1,'2026-01-01')")
+        db.execute(
+            "INSERT INTO vouchers(code,max_uses,created_at,tariff_id) VALUES('SINGLE',1,'2026-01-01',2)"
+        )
     monkeypatch.setattr(mod, "queue_email", Mock(side_effect=RuntimeError("queue failure")))
     with pytest.raises(RuntimeError):
         register(client, headers, voucher="SINGLE", payment_method="sepa")
@@ -163,7 +171,7 @@ def test_late_payment_does_not_touch_reassigned_table(mod):
     old_id = register(client, headers).json["registration_id"]
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=? WHERE id=?",
+            "UPDATE registrations SET expires_at=? WHERE id=?",
             ((mod.utcnow() - timedelta(hours=1)).isoformat(), old_id),
         )
     new_id = register(client, headers).json["registration_id"]
@@ -180,12 +188,14 @@ def test_late_payment_does_not_touch_reassigned_table(mod):
 def test_cancellation_and_expiry_only_release_once(mod):
     client, headers = client_for(mod)
     with connect(mod) as db:
-        db.execute("INSERT INTO vouchers(code,max_uses,created_at) VALUES('CODE',2,'2026-01-01')")
+        db.execute(
+            "INSERT INTO vouchers(code,max_uses,created_at,tariff_id) VALUES('CODE',2,'2026-01-01',2)"
+        )
     reg_id = register(client, headers, voucher="CODE").json["registration_id"]
     register(client, headers, table=2, voucher="CODE")
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=? WHERE id=?",
+            "UPDATE registrations SET expires_at=? WHERE id=?",
             ((mod.utcnow() - timedelta(hours=1)).isoformat(), reg_id),
         )
     barrier = threading.Barrier(2)
@@ -270,7 +280,7 @@ def test_expired_order_is_not_captured(mod, monkeypatch):
     client, headers, reg = prepare_order(mod, monkeypatch)
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
+            "UPDATE registrations SET expires_at=?",
             ((mod.utcnow() - timedelta(hours=1)).isoformat(),),
         )
     monkeypatch.setattr(mod, "paypal_get_order", Mock(return_value=order_for(reg, "APPROVED")))
@@ -435,9 +445,10 @@ def test_reminder_retry_does_not_set_sent_flag_early(mod, monkeypatch):
     reg_id = register(client, headers, payment_method="sepa").json["registration_id"]
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
-            ((mod.utcnow() - timedelta(hours=25)).isoformat(),),
+            "UPDATE registrations SET expires_at=?",
+            ((mod.utcnow() + timedelta(hours=23)).isoformat(),),
         )
+        db.execute("UPDATE registrations SET created_at=datetime(expires_at, '-48 hours')")
         db.execute("UPDATE email_outbox SET sent_at='already delivered'")
         db.commit()
         mod.send_sepa_reminders(db)
@@ -462,7 +473,7 @@ def test_expired_reminders_are_not_queued(mod):
     register(client, headers, payment_method="sepa")
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
+            "UPDATE registrations SET expires_at=?",
             ((mod.utcnow() - timedelta(hours=49)).isoformat(),),
         )
         db.commit()

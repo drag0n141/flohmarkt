@@ -106,9 +106,10 @@ def test_extension_postpones_unsent_reminder(mod):
     register(client, headers, payment_method="sepa")
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
-            ((mod.utcnow() - timedelta(hours=25)).isoformat(),),
+            "UPDATE registrations SET expires_at=?",
+            ((mod.utcnow() + timedelta(hours=23)).isoformat(),),
         )
+        db.execute("UPDATE registrations SET created_at=datetime(expires_at, '-48 hours')")
         db.commit()
         mod.send_sepa_reminders(db)
         assert (
@@ -128,7 +129,8 @@ def test_extension_postpones_unsent_reminder(mod):
 
 
 def test_extended_short_sepa_hold_gets_reminder(mod, monkeypatch):
-    monkeypatch.setattr(mod, "SEPA_HOLD_HOURS", 12)
+    with connect(mod) as db:
+        db.execute("UPDATE events SET sepa_hold_hours=12 WHERE archived_at IS NULL")
     client, headers = admin(mod)
     register(client, headers, payment_method="sepa")
     assert edit(client, headers, action="extend", hours="24").status_code == 302
@@ -200,7 +202,7 @@ def test_expired_and_paid_reservations_cannot_be_extended(mod):
     register(client, headers)
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
+            "UPDATE registrations SET expires_at=?",
             ((mod.utcnow() - timedelta(hours=1)).isoformat(),),
         )
     assert edit(client, headers, action="extend", hours="24").status_code == 400
@@ -230,7 +232,7 @@ def test_migration_defaults_preserve_derived_deadline(mod):
     register(client, headers)
     old_deadline = mod.deadline_for(get_reg(mod))
     mod.init_db()
-    assert get_reg(mod)["expires_at"] is None
+    assert get_reg(mod)["expires_at"] == old_deadline.isoformat()
     assert mod.deadline_for(get_reg(mod)) == old_deadline
 
 
@@ -270,9 +272,10 @@ def test_postponed_reminder_reappears_at_new_deadline(mod, monkeypatch):
     register(client, headers, payment_method="sepa")
     with connect(mod) as db:
         db.execute(
-            "UPDATE registrations SET created_at=?",
-            ((mod.utcnow() - timedelta(hours=25)).isoformat(),),
+            "UPDATE registrations SET expires_at=?",
+            ((mod.utcnow() + timedelta(hours=23)).isoformat(),),
         )
+        db.execute("UPDATE registrations SET created_at=datetime(expires_at, '-48 hours')")
         db.commit()
         mod.send_sepa_reminders(db)
     assert edit(client, headers, action="extend", hours="24").status_code == 302

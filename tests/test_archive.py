@@ -20,7 +20,7 @@ def archive(client, headers, keep=(), archive_name="Flohmarkt 2026", new_name="F
             "confirm": "yes",
             "archive_name": archive_name,
             "new_name": new_name,
-            "keep": list(keep),
+            "keep": list(keep) + ["tables", "tariffs", "deadlines"],
         },
     )
 
@@ -63,7 +63,7 @@ def test_archiving_frees_tables_and_keeps_bookings_in_the_archive(mod):
     assert get_reg(mod, reg_id)["event_id"] == old["id"]
 
     with connect(mod) as db:
-        statuses = {r[0] for r in db.execute("SELECT DISTINCT status FROM tables")}
+        statuses = {r[0] for r in db.execute("SELECT DISTINCT status FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL)")}
     assert statuses == {"free"}
 
     dashboard = client.get("/admin").text
@@ -126,7 +126,7 @@ def test_plan_and_table_positions_are_carried_over_independently(mod, tmp_path, 
     with connect(mod) as db:
         image = db.execute("SELECT value FROM settings WHERE key='floorplan_image'").fetchone()
         placed = db.execute(
-            "SELECT COUNT(*) FROM tables WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL"
+            "SELECT COUNT(*) FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) AND pos_x IS NOT NULL AND pos_y IS NOT NULL"
         ).fetchone()[0]
 
     assert (image is not None) is ("floorplan" in keep)
@@ -175,7 +175,7 @@ def test_vouchers_are_reset_or_removed(mod):
     client.post(
         "/admin/vouchers",
         headers=headers,
-        data={"action": "create", "code": "MG2026", "max_uses": "5"},
+        data={"action": "create", "tariff_id": "2", "code": "MG2026", "max_uses": "5"},
     )
     register(client, headers, voucher="MG2026", payment_method="sepa")
     with connect(mod) as db:
@@ -225,7 +225,7 @@ def test_archived_registrations_cannot_be_changed(mod):
     register(client, headers, table=1)
     client.post(f"/admin/cancel/{reg_id}", headers=headers)
     with connect(mod) as db:
-        assert db.execute("SELECT status FROM tables WHERE number=1").fetchone()[0] == "held"
+        assert db.execute("SELECT status FROM tables WHERE number=1 AND event_id=(SELECT id FROM events WHERE archived_at IS NULL)").fetchone()[0] == "held"
 
 
 def test_deleting_an_archive_removes_its_registrations(mod, tmp_path, monkeypatch):

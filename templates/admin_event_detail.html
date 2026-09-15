@@ -18,6 +18,11 @@
     </div>
     {% endif %}
 
+    {% if snapshot.get('tariffs') %}
+    <section class="card"><h2>Preise & Fristen dieser Veranstaltung</h2>
+    <p>Zahlungsfrist bei Überweisung: {{ snapshot.get('sepa_hold_hours') or '–' }} Stunden{% if snapshot.get('payment_cutoff') %} · Spätester Termin: {{ snapshot.payment_cutoff|admin_datetime }}{% endif %}</p>
+    <ul>{% for tariff in snapshot.tariffs %}<li>{{ tariff.name }}: {{ (tariff.amount_cents / 100)|admin_money }} {{ currency }} · {{ 'öffentlich' if tariff.visibility == 'public' else 'mit Gutscheincode' }}{{ ' · deaktiviert' if not tariff.active else '' }}</li>{% endfor %}</ul></section>
+    {% endif %}
     {% if floorplan_image_url %}
     <div class="card">
       <h2>Lageplan</h2>

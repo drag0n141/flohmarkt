@@ -13,7 +13,7 @@
       <div><dt>Status</dt><dd><span class="badge {{ reg.status }}">{{ reg.status|status_label }}</span></dd></div>
       <div><dt>E-Mail</dt><dd>{{ reg.email }}</dd></div>
       <div><dt>Telefon</dt><dd>{{ reg.phone or '–' }}</dd></div>
-      <div><dt>Betrag</dt><dd>{{ reg.price|admin_money }} {{ currency }}</dd></div>
+      <div><dt>Tarif bei Buchung</dt><dd>{{ reg.tariff_name or "–" }}</dd></div><div><dt>Betrag</dt><dd>{{ reg.price|admin_money }} {{ currency }}</dd></div>
       <div><dt>Zahlungsart</dt><dd>{{ 'Überweisung' if reg.payment_method == 'sepa' else 'PayPal' }}</dd></div>
       {% if reg.payment_method == 'sepa' %}<div><dt>Zahlungsreferenz</dt><dd>{{ reg.payment_reference }}</dd></div>{% endif %}
       <div><dt>Gutschein</dt><dd>{{ reg.voucher_code or '–' }}</dd></div>
@@ -63,9 +63,9 @@
       <input type="hidden" name="action" value="move">
       <label>Freier Zieltisch<select name="table" required>
         <option value="">Bitte auswählen</option>
-        {% for table in free_tables %}<option value="{{ table.number }}">Tisch {{ table.number }}</option>{% endfor %}
+        {% for table in free_tables %}<option value="{{ table.number }}">Tisch {{ table.number }} · regulär {{ (table.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}
       </select></label>
-      <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Tischwechsel speichern</button></div>
+      <label class="radio-inline"><input type="checkbox" name="keep_price" value="yes">Bei abweichendem Tarif den bisherigen Buchungspreis von {{ reg.price|admin_money }} {{ currency }} beibehalten</label><div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Tischwechsel speichern</button></div>
     </form>
     {% else %}<p>Derzeit ist kein anderer Tisch frei.</p>{% endif %}
   </details>

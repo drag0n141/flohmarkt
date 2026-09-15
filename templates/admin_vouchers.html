@@ -1,13 +1,9 @@
 {% extends "admin_base.html" %}
 {% block title %}Admin – Gutscheincodes{% endblock %}
-{% block heading %}Gutscheincodes (Mitgliederrabatt){% endblock %}
+{% block heading %}Gutscheincodes{% endblock %}
 {% block content %}
 
-    <p class="hint">
-      Regulärer Preis: <strong>{{ price_standard|admin_money }} {{ currency }}</strong> ·
-      Preis mit gültigem Gutschein: <strong>{{ price_internal|admin_money }} {{ currency }}</strong>
-    </p>
-
+    <p class="hint">Jeder Code schaltet einen zugeordneten Tarif frei. <a href="{{ url_for('admin_pricing') }}">Gutscheintarife verwalten</a>.</p>
     <div class="card">
       <h2>Einzelnen Code anlegen</h2>
       <p class="hint">Z. B. ein gemeinsamer Code für alle Mitglieder mit hoher Nutzungszahl.</p>
@@ -16,7 +12,7 @@
         <input type="hidden" name="action" value="create">
         <label>Code<input type="text" name="code" placeholder="z. B. MITGLIEDER2026" required></label>
         <label>Max. Nutzungen<input type="number" name="max_uses" value="1" min="1"></label>
-        <button type="submit">Anlegen</button>
+        <label>Tarif<select name="tariff_id" required>{% for t in tariffs %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}</select></label><button type="submit" {% if not tariffs %}disabled{% endif %}>Anlegen</button>
       </form>
     </div>
 
@@ -29,7 +25,7 @@
         <input type="hidden" name="action" value="bulk_generate">
         <label>Anzahl<input type="number" name="count" value="10" min="1" max="200"></label>
         <label>Präfix<input type="text" name="prefix" value="MG"></label>
-        <button type="submit">Generieren</button>
+        <label>Tarif<select name="tariff_id" required>{% for t in tariffs %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}</select></label><button type="submit" {% if not tariffs %}disabled{% endif %}>Generieren</button>
       </form>
     </div>
 
@@ -49,7 +45,7 @@
           <tbody>
             {% for v in vouchers %}
             <tr>
-              <td><code>{{ v.code }}</code></td>
+              <td><code>{{ v.code }}</code><br>{{ v.tariff_name or "Kein Tarif zugeordnet" }}</td>
               <td>{{ v.used_count }} / {{ v.max_uses }}</td>
               <td>
                 <span class="badge {{ 'paid' if v.active else 'cancelled' }}">

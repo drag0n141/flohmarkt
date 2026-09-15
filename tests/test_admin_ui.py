@@ -4,6 +4,7 @@ import pytest
 from test_booking import mod, client_for, register, connect, get_reg  # noqa: F401
 
 ADMIN_PAGES = {
+    "/admin/pricing": "/admin/pricing",
     "/admin": "/admin",
     "/admin/vouchers": "/admin/vouchers",
     "/admin/floorplan": "/admin/floorplan",
