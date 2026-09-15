@@ -4,128 +4,132 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<title>Flohmarkt – Tischvergabe</title>
+<title>{{ event_title }} – Tisch buchen</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
-<body data-has-paypal="{{ 'true' if paypal_client_id else 'false' }}"
+<body class="booking-body"
       data-price-standard="{{ price_standard }}"
       data-price-internal="{{ price_internal }}"
       data-currency="{{ currency }}">
-  <div class="wrap">
+<main class="booking-wrap">
+  <header class="booking-header">
+    <p class="eyebrow">Dein Platz auf dem Flohmarkt</p>
     <h1>{{ event_title }}</h1>
-    {% if event_info %}
-    <p class="event-info">{{ event_info }}</p>
-    {% endif %}
-
-    {% if faq_items %}
-    <details class="card faq-block">
-      <summary>Häufige Fragen (FAQ)</summary>
-      <dl class="faq-list">
-        {% for item in faq_items %}
-        <dt>{{ item.question }}</dt>
-        <dd>{{ item.answer }}</dd>
-        {% endfor %}
-      </dl>
-    </details>
-    {% endif %}
-
-    <div id="step-select" class="card">
-      <h2>1. Tisch auswählen</h2>
-      <div class="legend">
-        <span><i class="dot free"></i> frei</span>
-        <span><i class="dot held"></i> reserviert</span>
-        <span><i class="dot booked"></i> vergeben</span>
-      </div>
-      <div id="floorplan-view" class="plan-scroll" hidden>
-        <div id="floorplan-inner" class="plan-inner">
-          <img id="floorplan-image" alt="Lageplan">
-        </div>
-      </div>
-      <div id="grid" class="grid"></div>
-      <p id="tables-error" class="error" role="alert"></p>
-    </div>
-
-    <div id="step-form" class="card" hidden>
-      <h2>2. Deine Daten</h2>
-      <p>Ausgewählter Tisch: <strong id="selected-table-label"></strong></p>
-      <form id="reg-form">
-        <label>Name*<input type="text" id="name" maxlength="200" required></label>
-        <label>E-Mail*<input type="email" id="email" maxlength="254" required></label>
-        <label>Telefon<input type="tel" id="phone" maxlength="50"></label>
-        <label>Gutscheincode (optional)
-          <input type="text" id="voucher" maxlength="128" placeholder="z. B. MG-1A2B3C">
-        </label>
-        <p id="voucher-feedback" class="hint"></p>
-
-        {% if payment_methods_enabled|length > 1 %}
-        <label>Zahlungsart
-          <span class="payment-choice">
-            {% if 'paypal' in payment_methods_enabled %}
-            <label class="radio-inline">
-              <input type="radio" name="payment_method" value="paypal" checked> PayPal (sofort bezahlen)
-            </label>
-            {% endif %}
-            {% if 'sepa' in payment_methods_enabled %}
-            <label class="radio-inline">
-              <input type="radio" name="payment_method" value="sepa"
-                     {{ 'checked' if 'paypal' not in payment_methods_enabled }}> Überweisung (Tisch {{ sepa_hold_hours }}h reserviert)
-            </label>
-            {% endif %}
-          </span>
-        </label>
-        {% else %}
-        <input type="hidden" name="payment_method" value="{{ payment_methods_enabled[0] }}">
-        <p class="hint">Zahlungsart: {{ 'PayPal (sofort bezahlen)' if payment_methods_enabled[0] == 'paypal'
-          else 'Überweisung (Tisch ' ~ sepa_hold_hours ~ 'h reserviert)' }}</p>
-        {% endif %}
-
-        <p class="price-display">Zu zahlen: <strong id="live-price-label"></strong></p>
-        <div class="row">
-          <button type="submit">Reservieren &amp; zur Zahlung</button>
-          <button type="button" id="back-btn" class="secondary">Zurück zur Tischauswahl</button>
-        </div>
-        <p id="form-error" class="error"></p>
-      </form>
-    </div>
-
-    <div id="step-pay" class="card" hidden>
-      <h2>3. Standgebühr bezahlen</h2>
-      <p>Tisch <strong id="pay-table-label"></strong> ist für dich reserviert (10 Minuten).
-         Zu zahlen: <strong id="pay-price-label"></strong>.
-         Bitte schließe die Zahlung ab, um den Tisch verbindlich zu buchen.</p>
-      <div id="paypal-button-container"></div>
-      <p id="pay-error" class="error" role="alert"></p>
-      <button id="retry-payment" type="button" hidden>Zahlungsstatus erneut prüfen</button>
-    </div>
-
-    <div id="step-sepa-pending" class="card" hidden>
-      <h2>Reservierung erfolgreich 📬</h2>
-      <p>Tisch <strong id="sepa-table-label"></strong> ist bis zum
-         <strong id="sepa-deadline-label"></strong> für dich reserviert.
-         Zu zahlen: <strong id="sepa-price-label"></strong>, Verwendungszweck:
-         <strong id="sepa-reference-label"></strong>.</p>
-      <p class="hint">Die Bankverbindung und alle Details werden dir per E-Mail zugeschickt.
-         Falls keine E-Mail ankommt, kontaktiere bitte den Veranstalter.
-         Sobald deine Überweisung bei uns eingegangen und bestätigt ist, ist der Tisch verbindlich
-         gebucht. Geht die Zahlung nicht rechtzeitig ein, wird die Reservierung automatisch aufgehoben.</p>
-    </div>
-
-    <div id="step-payment-review" class="card" hidden>
-      <h2>Zahlung wird geklärt</h2>
-      <p id="payment-review-message" role="alert"></p>
-      <p>Bitte bezahle nicht erneut. Der Veranstalter kann den Vorgang in der Verwaltung prüfen.</p>
-    </div>
-
-    <div id="step-done" class="card" hidden>
-      <h2>Fertig! 🎉</h2>
-      <p>Deine Zahlung war erfolgreich. Tisch <strong id="done-table-label"></strong> ist für dich reserviert.
-         Eine Bestätigung wird dir per E-Mail zugeschickt.</p>
-    </div>
+    {% if event_info %}<p class="event-info">{{ event_info }}</p>{% endif %}
+    <p>Standgebühr pro Tisch: <strong id="standard-price">{{ '%.2f'|format(price_standard)|replace('.', ',') }} {{ currency }}</strong></p>
+  </header>
+  <nav aria-label="Buchungsfortschritt">
+    <ol class="booking-progress">
+      <li data-step="select" aria-current="step"><span>1</span>Tisch auswählen</li>
+      <li data-step="form"><span>2</span>Daten &amp; Zahlungsart</li>
+      <li data-step="finish"><span>3</span>Abschluss</li>
+    </ol>
+  </nav>
+  <noscript><p class="notice error">Bitte aktiviere JavaScript, um freie Tische anzuzeigen und zu buchen.</p></noscript>
+  <p id="startup-status" role="status">Buchungsseite wird geladen …</p>
+  <div id="startup-error" class="notice error" hidden>
+    <p role="alert">Die Buchungsseite konnte nicht geladen werden. Bitte prüfe deine Verbindung und versuche es erneut.</p>
+    <button type="button" id="retry-startup">Erneut laden</button>
   </div>
 
-  {% if paypal_client_id and 'paypal' in payment_methods_enabled %}
-  <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency={{ currency }}"></script>
-  {% endif %}
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <section id="step-select" class="card" hidden aria-labelledby="select-heading">
+    <div class="booking-section-header"><h2 id="select-heading" tabindex="-1">Tisch auswählen</h2><button type="button" id="refresh-tables" class="secondary">Aktualisieren</button></div>
+    <p id="availability" role="status">Verfügbarkeit wird geladen …</p>
+    <p class="hint">Dein Tisch wird erst mit dem Absenden deiner Daten reserviert.</p>
+    <div class="legend" aria-label="Tischbelegung">
+      <span><i class="dot free" aria-hidden="true"></i> frei</span>
+      <span><i class="dot held" aria-hidden="true"></i> reserviert</span>
+      <span><i class="dot booked" aria-hidden="true"></i> vergeben</span>
+    </div>
+    <div id="table-view-switch" class="view-switch" role="group" aria-label="Tischauswahl anzeigen als" hidden>
+      <button id="view-plan" type="button" aria-pressed="true">Lageplan</button>
+      <button id="view-list" type="button" aria-pressed="false" class="secondary">Tischliste</button>
+    </div>
+    <p id="plan-help" class="hint" hidden>Du kannst den Plan seitlich verschieben. In der Tischliste findest du alle Tische mit größeren Auswahlflächen.</p>
+    <div id="floorplan-view" class="plan-scroll" hidden tabindex="0" role="region" aria-label="Lageplan, seitlich scrollbar">
+      <div id="floorplan-inner" class="plan-inner"><img id="floorplan-image" alt="Lageplan mit auswählbaren Tischen"></div>
+    </div>
+    <div id="grid" class="public-table-grid" aria-label="Tischliste"></div>
+    <p id="tables-error" class="error" role="alert"></p>
+  </section>
+
+  <section id="step-form" class="card" hidden aria-labelledby="form-heading">
+    <h2 id="form-heading" tabindex="-1">Deine Daten &amp; Zahlungsart</h2>
+    <p class="hint">Mit * markierte Felder sind Pflichtfelder.</p>
+    <form id="reg-form">
+      <div class="booking-fields">
+        <label>Name *<input type="text" id="name" name="name" autocomplete="name" maxlength="200" required></label>
+        <label>E-Mail *<input type="email" id="email" name="email" autocomplete="email" inputmode="email" spellcheck="false" maxlength="254" required></label>
+        <label>Telefon (optional)<input type="tel" id="phone" name="phone" autocomplete="tel" maxlength="50"></label>
+        <label>Gutscheincode (optional)<input type="text" id="voucher" name="voucher" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="128" placeholder="z. B. MG-1A2B3C" aria-describedby="voucher-feedback"></label>
+      </div>
+      <p id="voucher-feedback" class="hint" role="status"></p>
+      <fieldset class="payment-options">
+        <legend>Zahlungsart</legend>
+        {% for method in payment_methods_enabled %}
+        <label class="payment-option">
+          <input type="radio" name="payment_method" value="{{ method }}" {% if loop.first %}checked{% endif %}>
+          <span><strong>{{ 'PayPal' if method == 'paypal' else 'Überweisung' }}</strong><small>{{ 'Direkt im nächsten Schritt bezahlen.' if method == 'paypal' else 'Bitte innerhalb von ' ~ sepa_hold_hours ~ ' Stunden überweisen. Bankdaten erhältst du per E-Mail.' }}</small></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <div class="booking-summary" aria-label="Zusammenfassung">
+        <dl><div><dt>Tisch</dt><dd id="selected-table-label"></dd></div><div><dt>Standgebühr</dt><dd id="summary-standard"></dd></div><div id="summary-discount-row" hidden><dt>Mitgliederrabatt</dt><dd id="summary-discount"></dd></div><div><dt>Zahlungsart</dt><dd id="summary-method"></dd></div><div class="summary-total"><dt>Gesamtbetrag</dt><dd id="live-price-label" aria-live="polite"></dd></div></dl>
+      </div>
+      <p id="form-error" class="error" role="alert" tabindex="-1"></p>
+      <button type="button" id="choose-another-table" class="secondary" hidden>Anderen Tisch auswählen</button>
+      <div class="booking-form-actions"><button type="button" id="back-btn" class="secondary">Zurück zur Tischauswahl</button><button type="submit" id="submit-booking">Weiter</button></div>
+    </form>
+  </section>
+
+  <section id="step-pay" class="card" hidden aria-labelledby="pay-heading">
+    <h2 id="pay-heading" tabindex="-1">Standgebühr bezahlen</h2>
+    <p>Dein Tisch ist bis <strong id="pay-deadline"></strong> reserviert. Bitte schließe die Zahlung ab, um ihn verbindlich zu buchen.</p>
+    <p class="countdown">Verbleibende Zeit: <strong id="pay-countdown" role="timer"></strong></p>
+    <div class="booking-summary"><dl><div><dt>Tisch</dt><dd id="pay-table-label"></dd></div><div><dt>Zahlungsart</dt><dd>PayPal</dd></div><div class="summary-total"><dt>Gesamtbetrag</dt><dd id="pay-price-label"></dd></div></dl></div>
+    <div id="paypal-button-container"></div>
+    <p id="pay-error" class="error" role="alert"></p>
+    <div class="booking-form-actions"><button id="reload-paypal" type="button" class="secondary" hidden>PayPal erneut laden</button><button id="retry-payment" type="button" class="secondary">Zahlungsstatus prüfen</button></div>
+  </section>
+
+  <section id="step-sepa-pending" class="card" hidden aria-labelledby="sepa-heading">
+    <p class="booking-status-label">Überweisung ausstehend</p><h2 id="sepa-heading" tabindex="-1">Reservierung angelegt</h2>
+    <div class="booking-summary"><dl><div><dt>Tisch</dt><dd id="sepa-table-label"></dd></div><div><dt>Reserviert bis</dt><dd id="sepa-deadline-label"></dd></div><div><dt>Zahlungsart</dt><dd>Überweisung</dd></div><div class="summary-total"><dt>Zu überweisen</dt><dd id="sepa-price-label"></dd></div></dl></div>
+    <label class="reference-label" for="sepa-reference-label">Verwendungszweck</label>
+    <div class="copy-reference"><input id="sepa-reference-label" readonly><button type="button" id="copy-reference" class="secondary">Kopieren</button></div><p id="copy-status" role="status" class="hint"></p>
+    <p>Die Bankverbindung und alle Details werden dir per E-Mail zugeschickt. Bitte verwende bei der Überweisung genau den angezeigten Verwendungszweck.</p>
+    <p class="hint">Falls keine E-Mail ankommt, prüfe deinen Spam-Ordner und kontaktiere gegebenenfalls den Veranstalter. Sobald deine Zahlung bestätigt ist, ist dein Tisch verbindlich gebucht. Ohne rechtzeitige Zahlung wird die Reservierung aufgehoben.</p>
+    <p id="sepa-error" class="error" role="alert"></p>
+    <div class="booking-form-actions"><button type="button" class="secondary" data-new-booking>Weiteren Tisch auswählen</button><button type="button" id="check-sepa">Buchungsstatus prüfen</button></div>
+  </section>
+
+  <section id="step-payment-review" class="card" hidden aria-labelledby="review-heading">
+    <h2 id="review-heading" tabindex="-1">Zahlung wird geklärt</h2>
+    <p id="payment-review-message" role="alert">Eine verbindliche Buchung konnte noch nicht bestätigt werden. Bitte kontaktiere den Veranstalter zur Klärung oder Erstattung.</p>
+    <p><strong>Bitte bezahle nicht erneut.</strong></p><p id="review-summary"></p>
+    <p id="review-error" class="error" role="alert"></p><button type="button" id="check-review" class="secondary">Buchungsstatus prüfen</button>
+  </section>
+
+  <section id="step-expired" class="card" hidden aria-labelledby="expired-heading">
+    <h2 id="expired-heading" tabindex="-1">Reservierung beendet</h2>
+    <p>Die Reservierung für Tisch <strong id="expired-table"></strong> ist abgelaufen oder wurde storniert. Der Tisch ist nicht mehr für dich reserviert.</p>
+    <p id="expired-payment-hint" class="hint">Falls du bereits bezahlt hast, prüfe zuerst den Zahlungsstatus. Bezahle nicht erneut, solange der Zahlungseingang unklar ist.</p>
+    <p id="expired-error" class="error" role="alert"></p>
+    <div class="booking-form-actions"><button type="button" id="check-expired" class="secondary">Zahlungsstatus prüfen</button><button type="button" data-new-booking>Zur Tischauswahl</button></div>
+  </section>
+
+  <section id="step-done" class="card" hidden aria-labelledby="done-heading">
+    <p class="booking-status-label">Zahlung bestätigt</p><h2 id="done-heading" tabindex="-1">Dein Tisch ist verbindlich gebucht</h2>
+    <div class="booking-summary"><dl><div><dt>Tisch</dt><dd id="done-table-label"></dd></div><div><dt>Zahlungsart</dt><dd id="done-method"></dd></div><div class="summary-total"><dt>Bezahlt</dt><dd id="done-price"></dd></div></dl></div>
+    <p>Eine Bestätigung wird dir per E-Mail zugeschickt. Wir freuen uns auf dich!</p>
+    <button type="button" class="secondary" data-new-booking>Weiteren Tisch auswählen</button>
+  </section>
+
+  {% if faq_items %}<details class="card faq-block"><summary>Häufige Fragen</summary><dl class="faq-list">{% for item in faq_items %}<dt>{{ item.question }}</dt><dd>{{ item.answer }}</dd>{% endfor %}</dl></details>{% endif %}
+</main>
+{% if paypal_client_id and 'paypal' in payment_methods_enabled %}
+<script id="paypal-sdk" data-sdk-src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&amp;currency={{ currency }}" src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&amp;currency={{ currency }}" async></script>
+{% endif %}
 </body>
 </html>
