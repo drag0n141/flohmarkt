@@ -41,15 +41,14 @@ function submit(h) {h.id('reg-form').dispatchEvent(new h.w.Event('submit', {bubb
 function input(h, name, value) {h.id(name).value = value; h.id(name).dispatchEvent(new h.w.Event('input', {bubbles: true}));}
 
 (async () => {
-  // Mobile list, plan/list completeness, field preservation and server conflict recovery.
+  // Plan is the default even on mobile; list switching and conflict recovery remain available.
   let h = await harness();
   assert.equal(h.id('step-select').hidden, false);
   assert.equal(h.id('grid').children.length, 3);
   assert.equal(h.id('grid').children[2].disabled, true);
   assert.match(h.id('availability').textContent, /2 von 3/);
-  assert.equal(h.id('floorplan-view').hidden, true);
-  h.id('view-plan').click();
   assert.equal(h.id('floorplan-view').hidden, false);
+  assert.equal(h.id('view-plan').getAttribute('aria-pressed'), 'true');
   h.id('view-list').click();
   h.id('grid').children[0].click();
   assert.equal(h.w.document.activeElement.id, 'form-heading');
