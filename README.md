@@ -227,9 +227,39 @@ The existing image workflow does not yet run this suite automatically; adding
 the test job requires permission to edit `.github/workflows/docker-publish.yml`.
 
 
+Optional DOM interaction checks use the actual Flask-rendered page with jsdom:
+
+```bash
+npm install --prefix /tmp/flohmarkt-ui-test jsdom
+NODE_PATH=/tmp/flohmarkt-ui-test/node_modules python -m pytest -q
+```
+
+These additional checks cover mobile list selection, plan/list switching,
+preserved contact fields after table conflicts, session recovery, payment
+errors, and confirmation using current booking details. They do not replace a
+visual desktop/mobile check or PayPal sandbox testing.
+
+## Public booking flow
+
+The public page provides a mobile-friendly table list and an optional floor
+plan, a price summary, and separate pending, paid, expired, and payment-review
+screens. PayPal holds display their actual server deadline and remaining time.
+Transfer references can be copied from the reservation summary.
+
+Reloading recovers the latest booking for the current event and the same browser
+session. It does not recover a session after cookies have been cleared or in a
+different browser. Contact details are not stored in localStorage. A repeated
+submission for an already-held table owned by that browser returns the existing
+booking without consuming another voucher or queuing another email.
+
+`GET /api/booking` returns the session-owned summary. The CSRF-protected
+`POST /api/booking/check` can reconcile an existing PayPal order using its server
+status; it never creates an order or captures a payment. Both summary responses
+use `Cache-Control: no-store`. Actual capture remains tied to PayPal approval.
+
 ## Admin booking management
 
-Open `/admin` and click **Bearbeiten** next to a registration. The edit page
+Open `/admin` and select **Weitere Aktionen → Bearbeiten** for a registration. The edit page
 provides three separate forms:
 
 - **Buchungsdaten:** correct the name, email address and phone number, including

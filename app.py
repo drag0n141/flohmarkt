@@ -1023,6 +1023,15 @@ def api_register():
         if table is None:
             return jsonify(error="Tisch existiert nicht."), 404
         if table["status"] != "free":
+            existing = db.execute(
+                "SELECT * FROM registrations WHERE id=?", (table["registration_id"],)
+            ).fetchone()
+            if (
+                owns_registration(existing)
+                and existing["event_id"] == active_event_id(db)
+                and existing["status"] in ("pending", "paid")
+            ):
+                return jsonify(public_booking(existing, table_number))
             return jsonify(error="Dieser Tisch ist leider nicht mehr verfügbar."), 409
         price, voucher_code = PRICE_STANDARD, None
         if voucher_input:
@@ -1066,16 +1075,78 @@ def api_register():
         reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
         if payment_method == "sepa":
             queue_email(db, "sepa", reg)
-    response = dict(
-        registration_id=registration_id,
-        table=table_number,
-        price=price,
-        voucher_applied=voucher_code is not None,
-        payment_method=payment_method,
-    )
-    if payment_method == "sepa":
-        response.update(reference=reference, deadline=display_deadline(reg))
-    return jsonify(response)
+    return jsonify(public_booking(reg, table_number))
+
+
+def public_booking(reg, table_number):
+    """Only disclose this summary after validating the browser owner."""
+    status = "review" if reg["payment_review"] else reg["status"]
+    return {
+        "registration_id": reg["id"],
+        "table": table_number,
+        "price": reg["price"],
+        "currency": CURRENCY,
+        "voucher_applied": bool(reg["voucher_code"]),
+        "payment_method": reg["payment_method"],
+        "status": status,
+        "reference": reg["payment_reference"],
+        "deadline": display_deadline(reg),
+        "expires_at": deadline_for(reg).replace(tzinfo=timezone.utc).isoformat(),
+        "server_time": utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "has_order": bool(reg["paypal_order_id"]),
+    }
+
+
+def owned_current_booking(db, registration_id=None):
+    owner = session.get("booking_owner")
+    if not owner:
+        return None
+    if registration_id is None:
+        return db.execute(
+            "SELECT r.*, t.number AS table_number FROM registrations r "
+            "JOIN tables t ON t.id=r.table_id WHERE r.owner_id=? AND r.event_id=? "
+            "ORDER BY r.id DESC LIMIT 1", (owner, active_event_id(db))
+        ).fetchone()
+    return db.execute(
+        "SELECT r.*, t.number AS table_number FROM registrations r "
+        "JOIN tables t ON t.id=r.table_id WHERE r.id=? AND r.owner_id=? AND r.event_id=?",
+        (registration_id, owner, active_event_id(db)),
+    ).fetchone()
+
+
+@app.route("/api/booking")
+@limiter.limit("60 per minute")
+def api_booking():
+    db = get_db()
+    release_stale_holds(db)
+    reg = owned_current_booking(db)
+    response = jsonify(booking=public_booking(reg, reg["table_number"]) if reg else None)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/booking/check", methods=["POST"])
+@limiter.limit("20 per minute")
+def api_check_booking():
+    registration_id = positive_id(json_object(), "registration_id")
+    db = get_db()
+    reg = owned_current_booking(db, registration_id)
+    if reg is None:
+        return jsonify(error="Buchung nicht gefunden."), 404
+    # Reconcile an existing order only. Checking status never initiates a charge.
+    if reg["payment_method"] == "paypal" and reg["paypal_order_id"] and reg["status"] != "paid":
+        try:
+            order = paypal_get_order(reg["paypal_order_id"])
+            record_completed_order(db, reg, order)
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+            return paypal_unavailable()
+    release_stale_holds(db)
+    reg = owned_current_booking(db, registration_id)
+    if reg is None:
+        return jsonify(error="Dieser Flohmarkt wurde inzwischen archiviert."), 409
+    response = jsonify(booking=public_booking(reg, reg["table_number"]))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def paypal_unavailable():
