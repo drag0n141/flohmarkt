@@ -4,21 +4,31 @@
 {% block content %}
 <a class="btn secondary" href="{{ url_for('admin_dashboard') }}">← Zurück zu Buchungen</a>
 
+<div id="booking-details">
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <div class="card form-card">
-    <p>Aktueller Tisch: <strong>{{ reg.table_number }}</strong> · Status: <strong>{{ reg.status|status_label }}</strong></p>
-    <p>Angemeldet am: {{ reg.created_at|admin_datetime }} · Gutschein: {{ reg.voucher_code or "–" }}</p>
-    <p>Zahlungsart: {{ 'Überweisung' if reg.payment_method == 'sepa' else 'PayPal' }}
-      · Preis: {{ reg.price|admin_money if reg.price is not none else '–' }} {{ currency }}</p>
-    {% if reg.payment_method == 'sepa' %}
-    <p>Zahlungsreferenz: <strong>{{ reg.payment_reference }}</strong></p>
-    <p class="hint">Die Zahlungsreferenz bleibt auch bei einem Tischwechsel unverändert, damit bereits angewiesene Überweisungen zugeordnet werden können.</p>
-    {% endif %}
-    {% if reg.status == 'pending' %}<p>Reserviert bis: <strong>{{ deadline }}</strong> (deutsche Ortszeit)</p>{% endif %}
-    <p class="hint">Noch nicht versendete E-Mails werden bei Änderungen mit den aktuellen Buchungsdaten und E-Mail-Vorlagen neu vorbereitet. Bereits versendete Nachrichten werden nicht erneut verschickt. Bitte informiere den Teilnehmer bei Bedarf selbst.</p>
+    <h2>{{ reg.name }}</h2>
+    <dl class="detail-summary">
+      <div><dt>Tisch</dt><dd>{{ reg.table_number }}</dd></div>
+      <div><dt>Status</dt><dd><span class="badge {{ reg.status }}">{{ reg.status|status_label }}</span></dd></div>
+      <div><dt>E-Mail</dt><dd>{{ reg.email }}</dd></div>
+      <div><dt>Telefon</dt><dd>{{ reg.phone or '–' }}</dd></div>
+      <div><dt>Betrag</dt><dd>{{ reg.price|admin_money }} {{ currency }}</dd></div>
+      <div><dt>Zahlungsart</dt><dd>{{ 'Überweisung' if reg.payment_method == 'sepa' else 'PayPal' }}</dd></div>
+      {% if reg.payment_method == 'sepa' %}<div><dt>Zahlungsreferenz</dt><dd>{{ reg.payment_reference }}</dd></div>{% endif %}
+      <div><dt>Gutschein</dt><dd>{{ reg.voucher_code or '–' }}</dd></div>
+      {% if reg.status == 'pending' %}<div><dt>Reserviert bis (deutsche Ortszeit)</dt><dd>{{ deadline }}</dd></div>{% endif %}
+      <div><dt>Angemeldet am</dt><dd>{{ reg.created_at|admin_datetime }}</dd></div>
+    </dl>
+    {% if reg.payment_review %}<p class="notice error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% elif reg.payment_received_at %}<p class="hint">Zahlungseingang erfasst.</p>{% endif %}
   </div>
-  <div class="card form-card">
-    <h2>Buchungsdaten</h2>
+  <details class="detail-help">
+    <summary>Hinweise zu Änderungen</summary>
+    <p class="hint">Noch nicht versendete E-Mails werden mit den aktuellen Buchungsdaten neu vorbereitet. Bereits versendete Nachrichten werden nicht erneut verschickt. Bitte informiere den Teilnehmer bei Bedarf selbst.</p>
+    {% if reg.payment_method == 'sepa' %}<p class="hint">Die Zahlungsreferenz bleibt auch bei einem Tischwechsel unverändert, damit bereits angewiesene Überweisungen zugeordnet werden können.</p>{% endif %}
+  </details>
+  <details class="card form-card detail-editor" {% if error and request.form.get('action') == 'contact' %}open{% endif %}>
+    <summary>Kontaktdaten bearbeiten</summary>
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="version" value="{{ reg.edit_version }}">
@@ -28,10 +38,10 @@
       <label>Telefon<input type="tel" name="phone" value="{{ reg.phone or '' }}" maxlength="50"></label>
       <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Buchungsdaten speichern</button></div>
     </form>
-  </div>
+  </details>
   {% if reg.status == 'pending' %}
-  <div class="card form-card">
-    <h2>Reservierungsfrist verlängern</h2>
+  <details class="card form-card detail-editor" {% if error and request.form.get('action') == 'extend' %}open{% endif %}>
+    <summary>Frist verlängern</summary>
     <p>Die Stunden werden zur bisherigen Frist {{ deadline }} hinzugefügt.</p>
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -40,11 +50,11 @@
       <label>Zusätzliche Stunden<input type="number" name="hours" min="1" max="720" step="1" value="24" required></label>
       <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Frist verlängern</button></div>
     </form>
-  </div>
+  </details>
   {% endif %}
   {% if reg.status in ('pending', 'paid') %}
-  <div class="card form-card">
-    <h2>Tisch wechseln</h2>
+  <details class="card form-card detail-editor" {% if error and request.form.get('action') == 'move' %}open{% endif %}>
+    <summary>Tisch wechseln</summary>
     <p>Zahlung, Preis, Gutschein und Reservierungsfrist bleiben erhalten. Der bisherige Tisch wird freigegeben.</p>
     {% if free_tables %}
     <form method="post">
@@ -58,7 +68,19 @@
       <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Tischwechsel speichern</button></div>
     </form>
     {% else %}<p>Derzeit ist kein anderer Tisch frei.</p>{% endif %}
-  </div>
+  </details>
   {% endif %}
 
+  {% if reg.status != 'cancelled' %}
+  <section class="card danger-zone">
+    <h2>Buchung stornieren</h2>
+    <p>Der Tisch wird freigegeben. Eine bereits eingegangene Zahlung wird nicht automatisch erstattet.</p>
+    <form method="post" action="{{ url_for('admin_cancel', registration_id=reg.id) }}"
+          onsubmit="return confirm('Buchung für Tisch {{ reg.table_number }} wirklich stornieren und Tisch freigeben? Eine Zahlung wird nicht automatisch erstattet.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="danger small">Buchung stornieren und Tisch freigeben</button>
+    </form>
+  </section>
+  {% endif %}
+</div>
 {% endblock %}
