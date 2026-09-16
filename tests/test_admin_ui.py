@@ -127,9 +127,12 @@ def test_dashboard_search_filters_and_deadline(mod):
 
 def test_review_filter_preserves_late_payment_workflow(mod):
     client, headers = admin(mod)
-    register(client, headers, payment_method="sepa", name="Zahlungsprüfung")
+    register(client, headers, payment_method="paypal", name="Zahlungsprüfung")
     client.post("/admin/cancel/1", headers=headers)
-    client.post("/admin/confirm-sepa/1", headers=headers)
+    # Actual late payment receipts still enter review; manual SEPA confirmation
+    # of a cancelled booking is no longer allowed.
+    with connect(mod) as db:
+        mod.finalize_paid_registration(db, 1)
     page = client.get("/admin?filter=review").text
     assert "Zahlungsprüfung" in page
     assert "Klärung erledigt" in page

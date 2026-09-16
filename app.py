@@ -995,12 +995,27 @@ def process_email_outbox(db, limit=20):
                     )
 
 
-def finalize_paid_registration(db, registration_id, captures=None):
+def finalize_paid_registration(db, registration_id, captures=None, *, manual_sepa=False):
     """Record received money separately from allocation, using fresh locked state."""
     with write_transaction(db):
         reg = db.execute("SELECT * FROM registrations WHERE id=?", (registration_id,)).fetchone()
         if reg is None:
             return "not_found"
+        if manual_sepa:
+            # Validate inside the same write lock as payment confirmation so a
+            # stale admin page cannot confirm a cancelled or archived booking.
+            table = db.execute("SELECT * FROM tables WHERE id=?", (reg["table_id"],)).fetchone()
+            if (
+                reg["payment_method"] != "sepa"
+                or reg["event_id"] != active_event_id(db)
+                or reg["status"] != "pending"
+                or reg["payment_received_at"]
+                or deadline_for(reg) <= utcnow()
+                or table is None
+                or table["status"] != "held"
+                or table["registration_id"] != registration_id
+            ):
+                return "manual_confirmation_not_allowed"
         now = utcnow().isoformat()
         if captures is not None:
             for capture in captures:
@@ -1922,12 +1937,12 @@ def admin_confirm_sepa(registration_id):
     elif reg["event_id"] != active_event_id(db):
         flash_error(ARCHIVED_REGISTRATION_MESSAGE)
     else:
-        outcome = finalize_paid_registration(db, registration_id)
+        outcome = finalize_paid_registration(db, registration_id, manual_sepa=True)
         if outcome in ("booked", "already_booked"):
             flash("Zahlung bestätigt – der Tisch ist gebucht.")
         else:
             flash_error(
-                "Zahlung erfasst, aber kein Tisch zugeordnet. Bitte Zuordnung oder Erstattung klären."
+                "Zahlungseingang kann nur für eine offene, gültige Überweisungsreservierung erfasst werden."
             )
     return redirect(url_for("admin_dashboard"))
 
@@ -2165,7 +2180,8 @@ def admin_tables():
         )
     return redirect(url_for("admin_floorplan", q=request.form.get("q", "")[:80],
                             filter=request.form.get("filter", "all"),
-                            page=request.form.get("page", 1, type=int), _anchor="inventory"))
+                            page=request.form.get("page", 1, type=int),
+                            per_page=request.form.get("per_page", 12, type=int), _anchor="inventory"))
 
 
 @app.route("/admin/vouchers", methods=["GET", "POST"])
@@ -2709,12 +2725,17 @@ def admin_floorplan():
         or (inventory_filter == "inactive" and not t["active"])
         or (inventory_filter == "unplaced" and (t["pos_x"] is None or t["pos_y"] is None))
     )]
-    page_count = max(1, (len(filtered) + 11) // 12)
+    page_sizes = (12, 25, 50, 100)
+    per_page = request.args.get("per_page", 12, type=int)
+    if per_page not in page_sizes:
+        per_page = 12
+    page_count = max(1, (len(filtered) + per_page - 1) // per_page)
     page = min(page_count, max(1, request.args.get("page", 1, type=int)))
     selected = next((t for t in tables if str(t["id"]) == request.args.get("edit")), None)
     return render_template(
         "admin_floorplan.html",
-        inventory=filtered[(page - 1) * 12:page * 12],
+        inventory=filtered[(page - 1) * per_page:page * per_page],
+        per_page=per_page, page_sizes=page_sizes,
         inventory_count=len(filtered), page=page, page_count=page_count,
         query=query, inventory_filter=inventory_filter, selected=selected,
         image_url=url_for("static", filename=f"uploads/{image}") if image else None,
