@@ -106,3 +106,62 @@ def test_lead_time_is_carried_over_with_deadlines(mod):
     pricing(client, headers, mod, action="reminder", reminder_duration="36", reminder_unit="hours")
     assert archive(client, headers).status_code == 302
     assert lead_hours(mod) == 36
+
+
+def test_disabling_clears_waiting_reminder_without_booking_edit(mod, monkeypatch):
+    client, headers = admin(mod)
+    book_sepa_with_deadline_in(mod, client, headers, hours=20)
+    with connect(mod) as db:
+        mod.send_sepa_reminders(db)
+        assert reminder_count(db) == 1
+    assert pricing(client, headers, mod, action="reminder", reminder_duration="0",
+                   reminder_unit="hours").status_code == 302
+    delivered = []
+    monkeypatch.setattr(mod, "SMTP_HOST", "mock")
+    monkeypatch.setattr(mod, "deliver_email", lambda row: delivered.append(row["kind"]))
+    with connect(mod) as db:
+        assert reminder_count(db) == 0
+        mod.process_email_outbox(db)
+    assert "reminder" not in delivered
+
+
+def test_shorter_lead_requeues_at_new_window_once(mod, monkeypatch):
+    client, headers = admin(mod)
+    book_sepa_with_deadline_in(mod, client, headers, hours=20)
+    with connect(mod) as db:
+        mod.send_sepa_reminders(db)
+        assert reminder_count(db) == 1
+    assert pricing(client, headers, mod, action="reminder", reminder_duration="12",
+                   reminder_unit="hours").status_code == 302
+    delivered = []
+    monkeypatch.setattr(mod, "SMTP_HOST", "mock")
+    monkeypatch.setattr(mod, "deliver_email", lambda row: delivered.append(row["kind"]))
+    with connect(mod) as db:
+        assert reminder_count(db) == 0
+        mod.send_sepa_reminders(db)
+        mod.process_email_outbox(db)
+        assert "reminder" not in delivered
+        future = mod.utcnow() + timedelta(hours=9)
+        monkeypatch.setattr(mod, "utcnow", lambda: future)
+        mod.send_sepa_reminders(db)
+        mod.process_email_outbox(db)
+        mod.send_sepa_reminders(db)
+        mod.process_email_outbox(db)
+        assert delivered.count("reminder") == 1
+
+
+def test_delivery_rechecks_obsolete_reminders(mod, monkeypatch):
+    client, headers = admin(mod)
+    book_sepa_with_deadline_in(mod, client, headers, hours=20)
+    delivered = []
+    monkeypatch.setattr(mod, "SMTP_HOST", "mock")
+    monkeypatch.setattr(mod, "deliver_email", lambda row: delivered.append(row["kind"]))
+    for hours in (0, 12, 120):
+        with connect(mod) as db:
+            # Simulate a stale queued message independently of the settings form.
+            mod.queue_email(db, "reminder", get_reg(mod))
+            db.execute("UPDATE events SET reminder_hours=?", (hours,))
+            db.commit()
+            mod.process_email_outbox(db)
+            assert reminder_count(db) == 0
+    assert "reminder" not in delivered
