@@ -168,6 +168,10 @@ def close_db(exception=None):
         db.close()
 
 
+# Default lead time of the payment reminder; configurable per event in the admin UI.
+DEFAULT_REMINDER_HOURS = 24
+
+
 def init_db():
     db = sqlite3.connect(DB_PATH, timeout=30)
     db.execute("BEGIN IMMEDIATE")
@@ -344,7 +348,11 @@ def init_db():
 def migrate_event_configuration(db, event_id):
     """One-time import. Environment variables never override persisted settings."""
     event_cols = {r[1] for r in db.execute("PRAGMA table_info(events)")}
-    for name, definition in {"sepa_hold_hours": "INTEGER", "payment_cutoff": "TEXT"}.items():
+    for name, definition in {
+        "sepa_hold_hours": "INTEGER",
+        "payment_cutoff": "TEXT",
+        "reminder_hours": f"INTEGER NOT NULL DEFAULT {DEFAULT_REMINDER_HOURS}",
+    }.items():
         if name not in event_cols:
             db.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
     db.execute("""CREATE TABLE IF NOT EXISTS tariffs (
@@ -511,6 +519,15 @@ def tariff_for(db, table, voucher=None):
     ):
         raise BadRequest("Dieser Tarif gilt nicht für den ausgewählten Tisch.")
     return tariff
+
+
+def reminder_lead(db):
+    """Lead time of the payment reminder before the deadline; None = disabled."""
+    event = active_event(db)
+    hours = event["reminder_hours"] if event and "reminder_hours" in event.keys() else None
+    if hours is None:
+        hours = DEFAULT_REMINDER_HOURS
+    return timedelta(hours=hours) if hours > 0 else None
 
 
 def configuration_ready(db):
@@ -1078,6 +1095,9 @@ def finalize_paid_registration(db, registration_id, captures=None, *, manual_sep
 
 def send_sepa_reminders(db):
     now = utcnow()
+    lead = reminder_lead(db)
+    if lead is None:
+        return
     with write_transaction(db):
         candidates = db.execute(
             "SELECT * FROM registrations WHERE status='pending' AND payment_method='sepa' "
@@ -1085,9 +1105,10 @@ def send_sepa_reminders(db):
         ).fetchall()
         for reg in candidates:
             deadline = deadline_for(reg)
-            if timedelta(0) < deadline - now <= timedelta(
-                hours=24
-            ) and deadline - datetime.fromisoformat(reg["created_at"]) > timedelta(hours=24):
+            if (
+                timedelta(0) < deadline - now <= lead
+                and deadline - datetime.fromisoformat(reg["created_at"]) > lead
+            ):
                 queue_email(db, "reminder", reg)
 
 
@@ -1744,9 +1765,10 @@ def refresh_pending_emails(db, reg):
         "AND sent_at IS NULL AND cancelled_at IS NULL",
         (reg["id"],),
     ).fetchall()
+    lead = reminder_lead(db)
     for row in rows:
         # A postponed reminder must become eligible again at the new deadline.
-        if row["kind"] == "reminder" and deadline_for(reg) - utcnow() > timedelta(hours=24):
+        if row["kind"] == "reminder" and (lead is None or deadline_for(reg) - utcnow() > lead):
             db.execute("DELETE FROM email_outbox WHERE id=?", (row["id"],))
             continue
         subject, body = render_registration_email(db, row["kind"], reg)
@@ -1998,6 +2020,17 @@ def admin_pricing():
                     db.execute(
                         "UPDATE events SET sepa_hold_hours=?,payment_cutoff=? WHERE id=?",
                         (hours, cutoff or None, event["id"]),
+                    )
+                elif action == "reminder":
+                    duration = bounded_int(request.form.get("reminder_duration"), 0, 8760)
+                    unit = request.form.get("reminder_unit")
+                    if unit not in ("hours", "days"):
+                        raise BadRequest("Ungültige Zeiteinheit.")
+                    hours = duration * (24 if unit == "days" else 1)
+                    if hours > 8760:
+                        raise BadRequest("Die Erinnerung darf höchstens 365 Tage vorher erfolgen.")
+                    db.execute(
+                        "UPDATE events SET reminder_hours=? WHERE id=?", (hours, event["id"])
                     )
                 elif action == "tariff":
                     name = text_field(request.form, "name", 80, required=True)
@@ -2305,6 +2338,7 @@ def admin_emails():
         reminder_subject=reminder_subject,
         reminder_body=reminder_body,
         sepa_hold_hours=active_event(db)["sepa_hold_hours"],
+        reminder_hours=active_event(db)["reminder_hours"],
     )
 
 
@@ -2431,6 +2465,7 @@ def build_event_snapshot(db, event_id, floorplan_image):
         ).fetchone()[0],
         "tariffs": [dict(t) for t in event_tariffs(db)],
         "sepa_hold_hours": active_event(db)["sepa_hold_hours"],
+        "reminder_hours": active_event(db)["reminder_hours"],
         "payment_cutoff": active_event(db)["payment_cutoff"],
         "inventory": [
             dict(t) for t in db.execute("SELECT * FROM tables WHERE event_id=?", (event_id,))
@@ -2502,8 +2537,14 @@ def archive_event(db, archive_name, new_name, keep):
             db.execute("DELETE FROM vouchers")
 
         new_id = db.execute(
-            "INSERT INTO events (name, created_at, sepa_hold_hours) VALUES (?, ?, ?)",
-            (new_name, now, event["sepa_hold_hours"] if "deadlines" in keep else None),
+            "INSERT INTO events (name, created_at, sepa_hold_hours, reminder_hours) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                new_name,
+                now,
+                event["sepa_hold_hours"] if "deadlines" in keep else None,
+                event["reminder_hours"] if "deadlines" in keep else DEFAULT_REMINDER_HOURS,
+            ),
         ).lastrowid
         tariff_map, table_map = {}, {}
         if "tariffs" in keep:
