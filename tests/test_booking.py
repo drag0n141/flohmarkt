@@ -605,18 +605,51 @@ def test_resolved_late_payment_is_not_reopened_by_replay(mod, monkeypatch):
     assert get_reg(mod, reg["id"])["payment_review"] == 0
 
 
-def test_sepa_late_admin_confirmation_is_visible_in_active_view(mod):
+def test_cancelled_sepa_cannot_be_confirmed_from_history_or_direct_post(mod):
     client, headers = client_for(mod)
     reg_id = register(client, headers, payment_method="sepa").json["registration_id"]
     with connect(mod) as db, mod.write_transaction(db):
         mod.cancel_registration_locked(db, get_reg(mod, reg_id))
     with client.session_transaction() as session:
         session["is_admin"] = True
+    assert "Zahlungseingang erfassen" not in client.get("/admin?view=history").text
+    before = dict(get_reg(mod, reg_id))
+    response = client.post(f"/admin/confirm-sepa/{reg_id}", headers=headers, follow_redirects=True)
+    assert "nur für eine offene, gültige" in response.text
+    assert dict(get_reg(mod, reg_id)) == before
+    with connect(mod) as db:
+        assert db.execute("SELECT status FROM tables WHERE number=1").fetchone()[0] == "free"
+        assert db.execute("SELECT COUNT(*) FROM email_outbox WHERE kind='confirmation'").fetchone()[0] == 0
+
+
+def test_manual_sepa_rejects_expired_reservation_without_recording_payment(mod):
+    client, headers = client_for(mod)
+    reg_id = register(client, headers, payment_method="sepa").json["registration_id"]
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+    with connect(mod) as db:
+        db.execute("UPDATE registrations SET expires_at=? WHERE id=?",
+                   ((mod.utcnow() - timedelta(seconds=1)).isoformat(), reg_id))
     assert client.post(f"/admin/confirm-sepa/{reg_id}", headers=headers).status_code == 302
-    response = client.get("/admin")
-    assert "Zahlung prüfen" in response.text
-    assert "Example Person" in response.text
-    assert get_reg(mod, reg_id)["status"] == "cancelled"
+    reg = get_reg(mod, reg_id)
+    assert reg["payment_received_at"] is None
+    assert reg["payment_review"] == 0
+
+
+def test_pending_sepa_can_still_be_confirmed_once(mod):
+    client, headers = client_for(mod)
+    reg_id = register(client, headers, payment_method="sepa").json["registration_id"]
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+    assert "Zahlungseingang erfassen" in client.get("/admin").text
+    client.post(f"/admin/confirm-sepa/{reg_id}", headers=headers)
+    before = dict(get_reg(mod, reg_id))
+    assert before["status"] == "paid"
+    assert before["payment_received_at"]
+    client.post(f"/admin/confirm-sepa/{reg_id}", headers=headers)
+    assert dict(get_reg(mod, reg_id)) == before
+    with connect(mod) as db:
+        assert db.execute("SELECT COUNT(*) FROM email_outbox WHERE kind='confirmation'").fetchone()[0] == 1
 
 
 def test_minimal_capture_response_is_reconciled(mod, monkeypatch):

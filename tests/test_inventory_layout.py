@@ -60,3 +60,30 @@ def test_picker_interactions(mod):
     result = subprocess.run(['node', 'tests/inventory_dom.cjs'], input=client.get('/admin/floorplan').text,
                             text=True, capture_output=True, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_inventory_page_sizes_and_navigation(mod):
+    client, headers = admin(mod)
+    with connect(mod) as db:
+        db.executemany('INSERT INTO tables(number,event_id,tariff_id) VALUES (?,1,1)',
+                       [(number,) for number in range(31, 106)])
+    for size in (12, 25, 50, 100):
+        page = client.get(f'/admin/floorplan?per_page={size}').text
+        assert page.count('>Bearbeiten</a>') == size
+        assert f'per_page={size}' in page
+        assert f'<option value="{size}" selected' in page
+    page = client.get('/admin/floorplan?per_page=25&page=999').text
+    assert 'Seite 5 von 5' in page
+    assert page.count('>Bearbeiten</a>') == 5
+    for invalid in ('0', '-1', '999999', 'invalid'):
+        assert client.get(f'/admin/floorplan?per_page={invalid}').text.count('>Bearbeiten</a>') == 12
+    page = client.get('/admin/floorplan?per_page=25&q=10').text
+    assert page.count('>Bearbeiten</a>') == 7
+    assert 'name="q" value="10"' in page
+    response = client.post('/admin/tables', headers=headers, data={
+        'action':'edit', 'event_id':'1', 'table_id':'30', 'number':'30',
+        'active':'yes', 'tariff_id':'1', 'per_page':'25', 'page':'2', 'filter':'free',
+    })
+    assert 'per_page=25' in response.location
+    assert 'page=2' in response.location
+    assert 'filter=free' in response.location

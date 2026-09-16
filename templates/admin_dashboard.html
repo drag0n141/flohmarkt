@@ -53,7 +53,7 @@
 <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>{% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen</span>{% elif r.payment_received_at %}<span class="cell-detail">Zahlungseingang erfasst</span>{% endif %}</td>
 <td>{{ display_deadline(r) if r.status == 'pending' else '–' }}</td>
 <td><div class="booking-actions">
-                {% if r.payment_method == 'sepa' and r.status != 'paid' and not r.payment_received_at %}
+                {% if r.payment_method == 'sepa' and r.status == 'pending' and not r.payment_received_at %}
                 <form method="post" action="{{ url_for('admin_confirm_sepa', registration_id=r.id) }}"
                       onsubmit="return confirm('Zahlungseingang für Tisch {{ r.table_number }} bestätigen?');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
