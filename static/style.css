@@ -294,7 +294,7 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 .admin-body p { line-height: 1.55; }
 .admin-body .hint { color: var(--admin-muted); }
 .admin-body button, .admin-body .btn, .admin-body select, .action-menu > summary { min-height: 40px; }
-.admin-body select { display: block; width: 100%; margin-top: 4px; border: 1px solid #bcc7d5; border-radius: 6px; padding: 10px; font: inherit; background: white; }
+.admin-body select, .admin-body .plan-picker-tools input { display: block; width: 100%; margin-top: 4px; border: 1px solid #bcc7d5; border-radius: 6px; padding: 10px; font: inherit; background: white; }
 .admin-body input:not([type=checkbox]):not([type=radio]), .admin-body textarea { border-color: #bcc7d5; }
 .admin-body select:focus-visible { outline: 2px solid #1f2430; outline-offset: 2px; }
 .admin-body button:disabled { opacity: .55; cursor: wait; }
