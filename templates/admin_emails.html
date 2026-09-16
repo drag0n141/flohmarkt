@@ -41,13 +41,18 @@
 
     <div class="card form-card email-panel" id="email-reminder" aria-labelledby="tab-reminder">
       <h2>Zahlungserinnerung</h2>
-      <p class="hint">Wird automatisch 24 Stunden vor Ablauf der Überweisungsfrist verschickt,
-        falls bis dahin noch nicht bezahlt wurde – nur einmal pro Reservierung
-        {% if sepa_hold_hours <= 24 %}
-        (aktuell <strong>deaktiviert</strong>, da die Zahlungsfrist mit {{ sepa_hold_hours }}h
-        nicht länger als 24h ist – ein „24h vorher“ ergibt dann keinen Sinn).
+      {% set lead = reminder_hours if reminder_hours is not none else 24 %}
+      <p class="hint">
+        {% if lead == 0 %}
+        Die Zahlungserinnerung ist aktuell <strong>deaktiviert</strong> (einstellbar unter
+        <a href="{{ url_for('admin_pricing') }}">Preise & Fristen</a>).
         {% else %}
-        .
+        Wird automatisch {{ lead }} Stunden vor Ablauf der Überweisungsfrist verschickt
+        (einstellbar unter <a href="{{ url_for('admin_pricing') }}">Preise & Fristen</a>),
+        falls bis dahin noch nicht bezahlt wurde – nur einmal pro
+        Reservierung{% if sepa_hold_hours and sepa_hold_hours <= lead %} (aktuell <strong>ohne
+        Wirkung</strong>, da die Zahlungsfrist mit {{ sepa_hold_hours }}h nicht länger als
+        {{ lead }}h ist).{% else %}.{% endif %}
         {% endif %}
         Läuft als Hintergrundprozess direkt in der App, unabhängig davon, ob gerade jemand die
         Seite besucht. Verfügbare Platzhalter:
