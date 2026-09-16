@@ -530,6 +530,33 @@ def reminder_lead(db):
     return timedelta(hours=hours) if hours > 0 else None
 
 
+def reminder_due(db, reg, *, now=None, lead=None):
+    """Check current event, booking and deadline before queuing or sending."""
+    now = now or utcnow()
+    lead = reminder_lead(db) if lead is None else lead
+    if (lead is None or reg is None or reg["status"] != "pending"
+            or reg["payment_method"] != "sepa" or reg["reminder_sent"]
+            or reg["event_id"] != active_event_id(db)):
+        return False
+    deadline = deadline_for(reg)
+    return (timedelta(0) < deadline - now <= lead
+            and deadline - datetime.fromisoformat(reg["created_at"]) > lead)
+
+
+def refresh_queued_reminders(db, event_id):
+    """Drop obsolete waiting reminders, preserving messages already in flight."""
+    rows = db.execute(
+        "SELECT o.id AS outbox_id, r.* FROM email_outbox o "
+        "JOIN registrations r ON r.id=o.registration_id "
+        "WHERE r.event_id=? AND o.kind='reminder' AND o.sent_at IS NULL "
+        "AND o.cancelled_at IS NULL AND o.locked_until<=?",
+        (event_id, time.time()),
+    ).fetchall()
+    for reg in rows:
+        if not reminder_due(db, reg):
+            db.execute("DELETE FROM email_outbox WHERE id=?", (reg["outbox_id"],))
+
+
 def configuration_ready(db):
     event = active_event(db)
     if not event or not event["sepa_hold_hours"]:
@@ -977,6 +1004,13 @@ def process_email_outbox(db, limit=20):
             ).fetchone()
             if row is None:
                 return
+            if row["kind"] == "reminder":
+                reg = db.execute(
+                    "SELECT * FROM registrations WHERE id=?", (row["registration_id"],)
+                ).fetchone()
+                if not reminder_due(db, reg):
+                    db.execute("DELETE FROM email_outbox WHERE id=?", (row["id"],))
+                    continue
             db.execute(
                 "UPDATE email_outbox SET lease_token=?, locked_until=?, attempts=attempts+1 WHERE id=?",
                 (token, now + 300, row["id"]),
@@ -1095,20 +1129,16 @@ def finalize_paid_registration(db, registration_id, captures=None, *, manual_sep
 
 def send_sepa_reminders(db):
     now = utcnow()
-    lead = reminder_lead(db)
-    if lead is None:
-        return
     with write_transaction(db):
+        lead = reminder_lead(db)
+        if lead is None:
+            return
         candidates = db.execute(
             "SELECT * FROM registrations WHERE status='pending' AND payment_method='sepa' "
             "AND reminder_sent=0"
         ).fetchall()
         for reg in candidates:
-            deadline = deadline_for(reg)
-            if (
-                timedelta(0) < deadline - now <= lead
-                and deadline - datetime.fromisoformat(reg["created_at"]) > lead
-            ):
+            if reminder_due(db, reg, now=now, lead=lead):
                 queue_email(db, "reminder", reg)
 
 
@@ -1768,7 +1798,7 @@ def refresh_pending_emails(db, reg):
     lead = reminder_lead(db)
     for row in rows:
         # A postponed reminder must become eligible again at the new deadline.
-        if row["kind"] == "reminder" and (lead is None or deadline_for(reg) - utcnow() > lead):
+        if row["kind"] == "reminder" and not reminder_due(db, reg, lead=lead):
             db.execute("DELETE FROM email_outbox WHERE id=?", (row["id"],))
             continue
         subject, body = render_registration_email(db, row["kind"], reg)
@@ -2032,6 +2062,7 @@ def admin_pricing():
                     db.execute(
                         "UPDATE events SET reminder_hours=? WHERE id=?", (hours, event["id"])
                     )
+                    refresh_queued_reminders(db, event["id"])
                 elif action == "tariff":
                     name = text_field(request.form, "name", 80, required=True)
                     cents = money_cents(request.form.get("price"))
