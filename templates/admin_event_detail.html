@@ -67,7 +67,7 @@
                 {% if r.payment_method == 'sepa' %}<br>{{ r.payment_reference }}{% endif %}</td>
               <td>{{ r.voucher_code or "–" }}</td>
               <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>
-                {% if r.payment_received_at %}<br>Zahlungseingang erfasst{% endif %}
+                {% if r.payment_received_at and r.status != 'paid' %}<br>Zahlungseingang erfasst{% endif %}
                 {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
               </td>
               <td>{{ r.created_at|admin_datetime }}</td>

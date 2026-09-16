@@ -50,7 +50,7 @@
 <td><a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail><strong>{{ r.table_number }}</strong></a></td>
 <td><a href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail>{{ r.name }}</a><span class="cell-detail">{{ r.email }}</span></td>
 <td>{{ r.price|admin_money }} {{ currency }}<span class="cell-detail">{{ 'Überweisung' if r.payment_method == 'sepa' else 'PayPal' }}</span></td>
-<td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>{% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen</span>{% elif r.payment_received_at %}<span class="cell-detail">Zahlungseingang erfasst</span>{% endif %}</td>
+<td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>{% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen</span>{% elif r.payment_received_at and r.status != 'paid' %}<span class="cell-detail">Zahlungseingang erfasst</span>{% endif %}</td>
 <td>{{ display_deadline(r) if r.status == 'pending' else '–' }}</td>
 <td><div class="booking-actions">
                 {% if r.payment_method == 'sepa' and r.status == 'pending' and not r.payment_received_at %}
