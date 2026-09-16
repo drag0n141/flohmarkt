@@ -692,7 +692,7 @@ def flash_error(message):
 
 
 # The database keeps the English status values; the interface is German.
-STATUS_LABELS = {"pending": "offen", "paid": "bezahlt", "cancelled": "storniert"}
+STATUS_LABELS = {"pending": "offen", "paid": "bezahlt", "cancelled": "storniert", "free": "frei", "held": "reserviert", "booked": "gebucht"}
 
 
 @app.template_filter("status_label")
@@ -2163,7 +2163,9 @@ def admin_tables():
             if isinstance(exc, BadRequest)
             else "Mindestens eine Tischnummer existiert bereits. Es wurde nichts geändert."
         )
-    return redirect(url_for("admin_floorplan"))
+    return redirect(url_for("admin_floorplan", q=request.form.get("q", "")[:80],
+                            filter=request.form.get("filter", "all"),
+                            page=request.form.get("page", 1, type=int), _anchor="inventory"))
 
 
 @app.route("/admin/vouchers", methods=["GET", "POST"])
@@ -2245,7 +2247,7 @@ def admin_vouchers():
         return redirect(url_for("admin_vouchers"))
 
     vouchers = db.execute(
-        "SELECT v.*, p.name AS tariff_name FROM vouchers v LEFT JOIN tariffs p ON p.id=v.tariff_id ORDER BY v.created_at DESC"
+        "SELECT v.*, p.name AS tariff_name, p.amount_cents AS tariff_amount_cents, p.active AS tariff_active FROM vouchers v LEFT JOIN tariffs p ON p.id=v.tariff_id ORDER BY v.created_at DESC"
     ).fetchall()
     return render_template(
         "admin_vouchers.html",
@@ -2697,8 +2699,24 @@ def admin_floorplan():
     tables = db.execute(
         "SELECT * FROM tables WHERE event_id=(SELECT id FROM events WHERE archived_at IS NULL) ORDER BY number"
     ).fetchall()
+    query = request.args.get("q", "").strip()[:80]
+    inventory_filter = request.args.get("filter", "all")
+    if inventory_filter not in ("all", "free", "held", "booked", "inactive", "unplaced"):
+        inventory_filter = "all"
+    filtered = [t for t in tables if (not query or query in str(t["number"])) and (
+        inventory_filter == "all"
+        or (inventory_filter in ("free", "held", "booked") and t["active"] and t["status"] == inventory_filter)
+        or (inventory_filter == "inactive" and not t["active"])
+        or (inventory_filter == "unplaced" and (t["pos_x"] is None or t["pos_y"] is None))
+    )]
+    page_count = max(1, (len(filtered) + 11) // 12)
+    page = min(page_count, max(1, request.args.get("page", 1, type=int)))
+    selected = next((t for t in tables if str(t["id"]) == request.args.get("edit")), None)
     return render_template(
         "admin_floorplan.html",
+        inventory=filtered[(page - 1) * 12:page * 12],
+        inventory_count=len(filtered), page=page, page_count=page_count,
+        query=query, inventory_filter=inventory_filter, selected=selected,
         image_url=url_for("static", filename=f"uploads/{image}") if image else None,
         tables=tables,
         tariffs=event_tariffs(db),
