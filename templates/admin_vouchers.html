@@ -36,6 +36,7 @@
           <thead>
             <tr>
               <th>Code</th>
+              <th>Tarif</th>
               <th>Genutzt</th>
               <th>Status</th>
               <th>Erstellt am</th>
@@ -45,7 +46,10 @@
           <tbody>
             {% for v in vouchers %}
             <tr>
-              <td><code>{{ v.code }}</code><br>{{ v.tariff_name or "Kein Tarif zugeordnet" }}</td>
+              <td><code class="voucher-code">{{ v.code }}</code></td>
+              <td><div class="voucher-tariff"><strong>{{ v.tariff_name or "Kein Tarif zugeordnet" }}</strong>
+                {% if v.tariff_amount_cents is not none %}<span>{{ (v.tariff_amount_cents / 100)|admin_money }} {{ currency }}{% if not v.tariff_active %} · Tarif deaktiviert{% endif %}</span>{% endif %}
+              </div></td>
               <td>{{ v.used_count }} / {{ v.max_uses }}</td>
               <td>
                 <span class="badge {{ 'paid' if v.active else 'cancelled' }}">
@@ -71,7 +75,7 @@
               </div></td>
             </tr>
             {% else %}
-            <tr><td colspan="5">Noch keine Gutscheincodes angelegt.</td></tr>
+            <tr><td colspan="6">Noch keine Gutscheincodes angelegt.</td></tr>
             {% endfor %}
           </tbody>
         </table>

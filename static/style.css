@@ -452,3 +452,27 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 .tariff-table-options { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding: 1rem 0; }
 .detail-editor > form { padding: 1rem 0; }
 .public-table.disabled, .plan-table-marker.disabled { background: #475569; color: #fff; cursor: not-allowed; opacity: 1; }
+
+/* Compact inventory and clearly separated voucher pricing. */
+.voucher-tariff { display: grid; gap: 3px; }
+.voucher-tariff strong { font-size: 14px; font-weight: 600; }
+.voucher-tariff span { font-size: 13px; color: #596579; white-space: nowrap; }
+.voucher-code { display: inline-block; padding: 4px 8px; border-radius: 6px; background: #f1f5f9; }
+.plan-upload > summary, .inventory-add > summary { cursor: pointer; font-weight: 650; }
+.plan-upload[open] > summary, .inventory-add[open] > summary { margin-bottom: 18px; }
+.inventory-add { border-bottom: 1px solid #e2e8f0; padding: 0 0 18px; margin: 16px 0; }
+.floorplan-editor .table-picker { max-height: 180px; overflow-y: auto; align-content: start; padding: 4px; }
+.plan-picker-tools, .inventory-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 16px; }
+.plan-picker-tools[hidden] { display: none; }
+.plan-picker-tools label, .inventory-toolbar label { margin: 0; flex: 1 1 180px; }
+.inventory-toolbar input, .inventory-toolbar select, .plan-picker-tools input, .plan-picker-tools select { width: 100%; }
+.inventory-heading, .inventory-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.inventory-heading h2 { margin: 0; }
+.inventory-pagination { margin-top: 16px; font-size: 14px; color: #596579; }
+.inventory-pagination > div { display: flex; gap: 8px; }
+.admin-body .inventory-table td { padding: 10px 12px; vertical-align: middle; }
+.table-scroll .inventory-table { min-width: 570px; }
+.placement-label { font-size: 13px; color: #596579; white-space: nowrap; }
+#inventory, #table-edit { scroll-margin-top: 20px; }
+#table-edit > form { margin-top: 18px; }
+.picker-btn[hidden] { display: none; }

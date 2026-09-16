@@ -1,56 +1,29 @@
 {% extends "admin_base.html" %}
-{% block title %}Admin – Lageplan{% endblock %}
-{% block heading %}Lageplan verwalten{% endblock %}
+{% block title %}Admin – Tische & Lageplan{% endblock %}
+{% block heading %}Tische & Lageplan{% endblock %}
 {% block content %}
-<section class="card">
-<h2>Tischbestand</h2><p>{{ tables|length }} Tische angelegt. Preise und Gültigkeit verwaltest du unter <a href="{{ url_for('admin_pricing') }}">Preise & Fristen</a>.</p>
-<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="add">
-<label>Ab Nummer<input type="number" name="start" min="1" required></label><label>Bis Nummer (optional)<input type="number" name="end" min="1"></label>
-<label>Öffentlicher Tarif<select name="tariff_id"><option value="">Später zuweisen</option>{% for t in tariffs if t.visibility == 'public' and t.all_tables %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
-<button type="submit">Tische hinzufügen</button></form>
-<p class="hint">Bis zu 1.000 Tische auf einmal. Belegte Tische können nicht deaktiviert werden. Tische mit Buchungshistorie bleiben erhalten.</p>
-{% for table in tables %}
-<details class="detail-editor"><summary>Tisch {{ table.number }} · {{ table.status|status_label }}{{ ' · deaktiviert' if not table.active else '' }}</summary>
-<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="table_id" value="{{ table.id }}">
-<label>Nummer<input type="number" name="number" min="1" value="{{ table.number }}" required></label>
-<label>Tarif<select name="tariff_id"><option value="">Noch kein Tarif</option>{% for t in tariffs if t.visibility == 'public' %}<option value="{{ t.id }}" {% if t.id == table.tariff_id %}selected{% endif %}>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
-<label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if table.active %}checked{% endif %}>Buchbar</label><button type="submit">Speichern</button>
-</form>
-<form method="post" action="{{ url_for('admin_tables') }}" onsubmit="return confirm('Diesen Tisch entfernen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="table_id" value="{{ table.id }}"><button class="danger small" type="submit">Entfernen</button></form>
-</details>{% endfor %}
-</section>
-
-
-    <div class="card">
-      <h2>1. Lageplan-Bild hochladen</h2>
-      <p class="hint">Ein Bild des Flohmarkt-Geländes (Skizze/Grundriss), auf dem anschließend
-        die Tische als Punkte platziert werden. Ein neuer Upload ersetzt das bisherige Bild.</p>
-      <form method="post" enctype="multipart/form-data">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="file" name="floorplan" accept=".png,.jpg,.jpeg,.webp" required>
-        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Hochladen</button></div>
-      </form>
-    </div>
-
     {% if image_url %}
     <div class="card">
-      <h2>2. Tische auf dem Plan platzieren</h2>
-      <p class="hint">Tischnummer in der Liste auswählen, dann auf die passende Stelle im Bild
+      <h2>Lageplan bearbeiten</h2>
+      <p class="hint">Tischnummer auswählen, dann auf die passende Stelle im Bild
         klicken. Bereits platzierte Tische erscheinen als nummerierte Punkte und können erneut
         angeklickt werden, um sie zu verschieben.</p>
 
       <div class="floorplan-editor">
-        <div class="table-picker">
+        <div class="plan-picker-tools" hidden>
+          <label>Tisch suchen<input id="plan-table-search" type="search" inputmode="numeric" placeholder="Tischnummer" autocomplete="off"></label>
+          <label>Anzeige<select id="plan-placement-filter"><option value="all">Alle Tische</option><option value="unplaced">Noch nicht platziert</option><option value="placed">Bereits platziert</option></select></label>
+        </div>
+        <div class="table-picker" aria-label="Tisch zum Platzieren auswählen">
           {% for t in tables %}
           <button type="button" class="picker-btn {{ 'placed' if t.pos_x is not none else '' }}"
-                  data-number="{{ t.number }}">
+                  data-number="{{ t.number }}" aria-label="Tisch {{ t.number }} auswählen" aria-pressed="false">
             {{ t.number }}
           </button>
           {% endfor %}
         </div>
-        <p id="picker-status" class="hint">Kein Tisch ausgewählt.</p>
+        <p id="plan-picker-empty" class="hint" hidden>Keine passenden Tische gefunden.</p>
+        <p id="picker-status" role="status" aria-live="polite" class="hint">Kein Tisch ausgewählt.</p>
 
         <div id="plan-container" class="plan-scroll">
           <div id="plan-inner" class="plan-inner">
@@ -69,5 +42,60 @@
     <p class="hint">Noch kein Lageplan hochgeladen.</p>
     {% endif %}
 
+    <details class="card plan-upload" {% if not image_url %}open{% endif %}>
+      <summary>{{ "Lageplan-Bild ersetzen" if image_url else "Lageplan-Bild hochladen" }}</summary>
+      <p class="hint">Ein Bild des Flohmarkt-Geländes (Skizze/Grundriss), auf dem anschließend
+        die Tische als Punkte platziert werden. Ein neuer Upload ersetzt das bisherige Bild.</p>
+      <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="file" name="floorplan" accept=".png,.jpg,.jpeg,.webp" required>
+        <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Hochladen</button></div>
+      </form>
+    </details>
+
+<section class="card inventory-section" id="inventory">
+  <div class="inventory-heading"><div><h2>Tischbestand</h2><p class="hint">{{ tables|length }} Tische angelegt · <a href="{{ url_for('admin_pricing') }}">Preise & Fristen verwalten</a></p></div></div>
+  <details class="inventory-add"><summary>Tische hinzufügen</summary>
+<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="add">
+<label>Ab Nummer<input type="number" name="start" min="1" required></label><label>Bis Nummer (optional)<input type="number" name="end" min="1"></label>
+<label>Öffentlicher Tarif<select name="tariff_id"><option value="">Später zuweisen</option>{% for t in tariffs if t.visibility == 'public' and t.all_tables %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
+<button type="submit">Tische hinzufügen</button></form>
+  <p class="hint">Für einen einzelnen Tisch reicht die erste Nummer. Mit einer Endnummer legst du einen ganzen Bereich an.</p></details>
+  <form method="get" action="{{ url_for('admin_floorplan', _anchor='inventory') }}" class="inventory-toolbar">
+    <label>Tisch suchen<input type="search" name="q" value="{{ query }}" placeholder="Tischnummer" inputmode="numeric"></label>
+    <label>Status<select name="filter">{% for value, label in [('all','Alle Tische'),('free','Frei'),('held','Reserviert'),('booked','Gebucht'),('inactive','Deaktiviert'),('unplaced','Noch nicht platziert')] %}<option value="{{ value }}" {% if inventory_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button type="submit" class="secondary">Anzeigen</button>
+    {% if query or inventory_filter != 'all' %}<a href="{{ url_for('admin_floorplan', _anchor='inventory') }}">Zurücksetzen</a>{% endif %}
+  </form>
+  <div class="table-scroll"><table class="admin-table inventory-table">
+    <thead><tr><th>Tisch</th><th>Status</th><th>Tarif</th><th>Lageplan</th><th>Aktionen</th></tr></thead>
+    <tbody>{% for table in inventory %}<tr>
+      <td><strong>{{ table.number }}</strong></td>
+      <td><span class="badge {{ 'cancelled' if not table.active else ('paid' if table.status == 'free' else 'pending' if table.status == 'held' else 'cancelled') }}">{{ table.status|status_label if table.active else 'deaktiviert' }}</span></td>
+      <td>{% set tariff = tariffs|selectattr('id','equalto',table.tariff_id)|first %}{{ tariff.name if tariff else 'Noch kein Tarif' }}</td>
+      <td><span class="placement-label">{{ 'Platziert' if table.pos_x is not none and table.pos_y is not none else 'Noch offen' }}</span></td>
+      <td><a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, page=page, edit=table.id, _anchor='table-edit') }}">Bearbeiten</a></td>
+    </tr>{% else %}<tr><td colspan="5">Keine passenden Tische gefunden.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <nav class="inventory-pagination" aria-label="Tischbestand Seiten">
+    <span>{{ inventory_count }} Treffer · Seite {{ page }} von {{ page_count }}</span>
+    <div>{% if page > 1 %}<a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, page=page-1, _anchor='inventory') }}">Zurück</a>{% endif %}
+    {% if page < page_count %}<a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, page=page+1, _anchor='inventory') }}">Weiter</a>{% endif %}</div>
+  </nav>
+</section>
+{% if selected %}<section class="card" id="table-edit">
+  <div class="inventory-heading"><h2>Tisch {{ selected.number }} bearbeiten</h2><a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, page=page, _anchor='inventory') }}">Schließen</a></div>
+<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="table_id" value="{{ selected.id }}">
+<label>Nummer<input type="number" name="number" min="1" value="{{ selected.number }}" required></label>
+<label>Tarif<select name="tariff_id"><option value="">Noch kein Tarif</option>{% for t in tariffs if t.visibility == 'public' %}<option value="{{ t.id }}" {% if t.id == selected.tariff_id %}selected{% endif %}>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
+<label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if selected.active %}checked{% endif %}>Buchbar</label><button type="submit">Speichern</button>
+</form>
+<form method="post" action="{{ url_for('admin_tables') }}" onsubmit="return confirm('Diesen Tisch entfernen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="table_id" value="{{ selected.id }}"><button class="danger small" type="submit">Entfernen</button></form>
+
+  <p class="hint">Belegte Tische können nicht deaktiviert werden. Tische mit Buchungshistorie bleiben erhalten.</p>
+</section>{% endif %}
+
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='admin_floorplan.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='admin_floorplan.js') }}"></script><script src="{{ url_for('static', filename='admin_inventory.js') }}"></script>{% endblock %}
