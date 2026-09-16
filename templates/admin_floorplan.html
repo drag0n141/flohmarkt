@@ -65,7 +65,7 @@
   <form method="get" action="{{ url_for('admin_floorplan', _anchor='inventory') }}" class="inventory-toolbar">
     <input type="hidden" name="per_page" value="{{ per_page }}">
     <label>Tisch suchen<input type="search" name="q" value="{{ query }}" placeholder="Tischnummer" inputmode="numeric"></label>
-    <label>Status<select name="filter">{% for value, label in [('all','Alle Tische'),('free','Frei'),('held','Reserviert'),('booked','Gebucht'),('inactive','Deaktiviert'),('unplaced','Noch nicht platziert')] %}<option value="{{ value }}" {% if inventory_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Status<select name="filter">{% for value, label in [('all','Alle Tische'),('free','Frei'),('held','Reserviert'),('booked','Vergeben'),('inactive','Deaktiviert'),('unplaced','Noch nicht platziert')] %}<option value="{{ value }}" {% if inventory_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
     <button type="submit" class="secondary">Anzeigen</button>
     {% if query or inventory_filter != 'all' %}<a href="{{ url_for('admin_floorplan', per_page=per_page, _anchor='inventory') }}">Zurücksetzen</a>{% endif %}
   </form>
@@ -73,7 +73,7 @@
     <thead><tr><th>Tisch</th><th>Status</th><th>Tarif</th><th>Lageplan</th><th>Aktionen</th></tr></thead>
     <tbody>{% for table in inventory %}<tr>
       <td><strong>{{ table.number }}</strong></td>
-      <td><span class="badge {{ 'cancelled' if not table.active else ('paid' if table.status == 'free' else 'pending' if table.status == 'held' else 'cancelled') }}">{{ table.status|status_label if table.active else 'deaktiviert' }}</span></td>
+      <td><span class="badge {{ table.status if table.active else 'inactive' }}">{{ table.status|status_label if table.active else 'deaktiviert' }}</span></td>
       <td>{% set tariff = tariffs|selectattr('id','equalto',table.tariff_id)|first %}{{ tariff.name if tariff else 'Noch kein Tarif' }}</td>
       <td><span class="placement-label">{{ 'Platziert' if table.pos_x is not none and table.pos_y is not none else 'Noch offen' }}</span></td>
       <td><a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, per_page=per_page, page=page, edit=table.id, _anchor='table-edit') }}">Bearbeiten</a></td>
@@ -94,17 +94,16 @@
     {% if page < page_count %}<a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, per_page=per_page, page=page+1, _anchor='inventory') }}">Weiter</a>{% endif %}</div>
   </nav>
 </section>
-{% if selected %}<section class="card" id="table-edit">
+{% if selected %}<section class="card form-card" id="table-edit">
   <div class="inventory-heading"><h2>Tisch {{ selected.number }} bearbeiten</h2><a class="btn secondary small" href="{{ url_for('admin_floorplan', q=query, filter=inventory_filter, per_page=per_page, page=page, _anchor='inventory') }}">Schließen</a></div>
-<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form">
+<form method="post" action="{{ url_for('admin_tables') }}" class="inline-form" id="table-edit-form">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="per_page" value="{{ per_page }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="table_id" value="{{ selected.id }}">
 <label>Nummer<input type="number" name="number" min="1" value="{{ selected.number }}" required></label>
 <label>Tarif<select name="tariff_id"><option value="">Noch kein Tarif</option>{% for t in tariffs if t.visibility == 'public' %}<option value="{{ t.id }}" {% if t.id == selected.tariff_id %}selected{% endif %}>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }}</option>{% endfor %}</select></label>
-<label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if selected.active %}checked{% endif %}>Buchbar</label><button type="submit">Speichern</button>
+<label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if selected.active %}checked{% endif %}>Buchbar</label>
 </form>
-<form method="post" action="{{ url_for('admin_tables') }}" onsubmit="return confirm('Diesen Tisch entfernen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="per_page" value="{{ per_page }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="table_id" value="{{ selected.id }}"><button class="danger small" type="submit">Entfernen</button></form>
-
   <p class="hint">Belegte Tische können nicht deaktiviert werden. Tische mit Buchungshistorie bleiben erhalten.</p>
+<div class="form-actions"><form method="post" action="{{ url_for('admin_tables') }}" onsubmit="return confirm('Diesen Tisch entfernen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="filter" value="{{ inventory_filter }}"><input type="hidden" name="per_page" value="{{ per_page }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="table_id" value="{{ selected.id }}"><button class="danger" type="submit">Entfernen</button></form><button type="submit" form="table-edit-form">Speichern</button></div>
 </section>{% endif %}
 
 {% endblock %}

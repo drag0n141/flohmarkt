@@ -16,17 +16,25 @@
 <a href="{{ url_for('admin_dashboard', view='plan') }}" class="{{ 'active' if view == 'plan' else '' }}">Lageplan</a>
 </nav>
 {% if view == 'plan' %}
-<p class="hint">Tischbelegung: Grün = frei · Gelb = reserviert · Rot = vergeben.</p>
     {% if floorplan_image_url %}
     <div class="card">
       <h2>Lageplan</h2>
-      <p class="hint">Auf einen Tisch klicken, um nach seiner Buchung zu suchen.</p>
+      <p class="hint">Auf einen reservierten oder vergebenen Tisch klicken, um seine Buchung zu öffnen.</p>
+      <div class="legend" aria-label="Tischbelegung">
+        <span><i class="dot free" aria-hidden="true"></i> frei</span>
+        <span><i class="dot held" aria-hidden="true"></i> reserviert</span>
+        <span><i class="dot booked" aria-hidden="true"></i> vergeben</span>
+      </div>
       <div class="plan-scroll dashboard-plan-container">
         <div class="plan-inner">
           <img src="{{ floorplan_image_url }}" alt="Lageplan">
           {% for t in plan_tables %}
+          {% if t.status == 'free' %}
+          <span class="plan-table-marker free" style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}, frei">{{ t.number }}</span>
+          {% else %}
           <a href="{{ url_for('admin_dashboard', q=t.number) }}" class="plan-table-marker {{ t.status }}"
-             style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}">{{ t.number }}</a>
+             style="left: {{ t.pos_x }}%; top: {{ t.pos_y }}%;" title="Tisch {{ t.number }}, {{ t.status|status_label }}">{{ t.number }}</a>
+          {% endif %}
           {% endfor %}
         </div>
       </div>

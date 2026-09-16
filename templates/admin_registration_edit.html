@@ -1,11 +1,11 @@
 {% extends "admin_base.html" %}
-{% block title %}Buchung {{ reg.id }} bearbeiten{% endblock %}
-{% block heading %}Buchung {{ reg.id }} bearbeiten{% endblock %}
+{% block title %}Admin – Buchung Tisch {{ reg.table_number }}{% endblock %}
+{% block heading %}Buchung für Tisch {{ reg.table_number }}{% endblock %}
 {% block content %}
 <a class="btn secondary" href="{{ url_for('admin_dashboard') }}">← Zurück zu Buchungen</a>
 
 <div id="booking-details">
-  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
   <div class="card form-card">
     <h2>{{ reg.name }}</h2>
     <dl class="detail-summary">
@@ -72,7 +72,7 @@
   {% endif %}
 
   {% if reg.status != 'cancelled' %}
-  <section class="card danger-zone">
+  <section class="card form-card danger-zone">
     <h2>Buchung stornieren</h2>
     <p>Der Tisch wird freigegeben. Eine bereits eingegangene Zahlung wird nicht automatisch erstattet.</p>
     <form method="post" action="{{ url_for('admin_cancel', registration_id=reg.id) }}"
