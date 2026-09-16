@@ -20,7 +20,7 @@
       {% if reg.status == 'pending' %}<div><dt>Reserviert bis (deutsche Ortszeit)</dt><dd>{{ deadline }}</dd></div>{% endif %}
       <div><dt>Angemeldet am</dt><dd>{{ reg.created_at|admin_datetime }}</dd></div>
     </dl>
-    {% if reg.payment_review %}<p class="notice error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% elif reg.payment_received_at %}<p class="hint">Zahlungseingang erfasst.</p>{% endif %}
+    {% if reg.payment_review %}<p class="notice error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% elif reg.payment_received_at and reg.status != 'paid' %}<p class="hint">Zahlungseingang erfasst.</p>{% endif %}
   </div>
   <details class="detail-help">
     <summary>Hinweise zu Änderungen</summary>
