@@ -14,6 +14,18 @@
 <p class="hint">Reservierungen enden spätestens an diesem Termin. Danach sind keine neuen Buchungen möglich. PayPal reserviert weiterhin höchstens 10 Minuten. Bestehende Reservierungen behalten ihre Frist.</p>
 <div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Frist speichern</button></div>
 </form></section>
+<section class="card form-card">
+<h2>Zahlungserinnerung</h2>
+{% set reminder_hours = event.reminder_hours if event.reminder_hours is not none else 24 %}
+{% set reminder_days = reminder_hours > 0 and reminder_hours % 24 == 0 %}
+{% set reminder_submitted = request.form.get('action') == 'reminder' %}
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="reminder">
+<div class="inline-form"><label>Vor Fristablauf<input type="number" name="reminder_duration" min="0" max="8760" value="{{ request.form.get('reminder_duration') if reminder_submitted else (reminder_hours // 24 if reminder_days else reminder_hours) }}" required></label>
+<label>Einheit<select name="reminder_unit"><option value="hours">Stunden</option><option value="days" {% if (request.form.get('reminder_unit') == 'days' if reminder_submitted else reminder_days) %}selected{% endif %}>Tage</option></select></label></div>
+<p class="hint">Bei offener Überweisung wird die Erinnerung einmal pro Reservierung so lange vor Ablauf der Zahlungsfrist verschickt. 0 schaltet die Erinnerung ab. Ist die Zahlungsfrist nicht länger als dieser Zeitraum, entfällt die Erinnerung.{% if event.sepa_hold_hours and reminder_hours > 0 and event.sepa_hold_hours <= reminder_hours %} <strong>Mit der aktuellen Zahlungsfrist von {{ event.sepa_hold_hours }} Stunden wird keine Erinnerung verschickt.</strong>{% endif %}</p>
+<div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Erinnerung speichern</button></div>
+</form></section>
 {% macro tariff_form(t=none) %}
 {% set submitted = request.form.get('action') == 'tariff' and request.form.get('tariff_id', '') == (t.id|string if t else '') %}
 <form method="post" data-tariff-form>
