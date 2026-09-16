@@ -12,11 +12,11 @@
 <label>Einheit<select name="unit"><option value="hours">Stunden</option><option value="days" {% if request.form.get('unit') == 'days' %}selected{% endif %}>Tage</option></select></label></div>
 <label>Buchungen und Zahlungen spätestens bis (optional, deutsche Ortszeit)<input type="datetime-local" name="cutoff" value="{{ request.form.get('cutoff', cutoff) }}"></label>
 <p class="hint">Reservierungen enden spätestens an diesem Termin. Danach sind keine neuen Buchungen möglich. PayPal reserviert weiterhin höchstens 10 Minuten. Bestehende Reservierungen behalten ihre Frist.</p>
-<button type="submit">Frist speichern</button>
+<div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Frist speichern</button></div>
 </form></section>
 {% macro tariff_form(t=none) %}
 {% set submitted = request.form.get('action') == 'tariff' and request.form.get('tariff_id', '') == (t.id|string if t else '') %}
-<form method="post">
+<form method="post" data-tariff-form>
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="tariff"><input type="hidden" name="tariff_id" value="{{ t.id if t else '' }}">
 <div class="inline-form">
 <label>Tarifname<input name="name" maxlength="80" value="{{ request.form.get('name') if submitted else (t.name if t else '') }}" required></label>
@@ -25,17 +25,17 @@
 </div>
 <label class="radio-inline"><input type="checkbox" name="active" value="yes" {% if (request.form.get('active') == 'yes' if submitted else (t.active if t else true)) %}checked{% endif %}>Für neue Buchungen aktiv</label>
 <label>Gilt für<select name="scope"><option value="all">Alle Tische, auch künftig hinzugefügte</option><option value="selected" {% if (request.form.get('scope') == 'selected' if submitted else (t and not t.all_tables)) %}selected{% endif %}>Nur ausgewählte Tische</option></select></label>
-<details><summary>Tische für die eingeschränkte Gültigkeit auswählen</summary><div class="tariff-table-options">
+<details data-tariff-tables{% if t and not t.all_tables %} open{% endif %}><summary>Tische für die eingeschränkte Gültigkeit auswählen</summary><div class="tariff-table-options">
 {% for table in tables %}<label class="radio-inline"><input type="checkbox" name="table_ids" value="{{ table.id }}" {% if (table.id|string in request.form.getlist('table_ids') if submitted else (t and table.id in assignments.get(t.id, []))) %}checked{% endif %}>Tisch {{ table.number }}</label>{% endfor %}
 </div></details>
-<label class="radio-inline"><input type="checkbox" name="assign" value="yes">Diesen öffentlichen Tarif den betreffenden Tischen zuweisen</label>
+<label class="radio-inline" data-tariff-assign><input type="checkbox" name="assign" value="yes">Diesen öffentlichen Tarif den betreffenden Tischen zuweisen</label>
 <p class="hint">Pro Tisch gilt ein öffentlicher Tarif. Gutscheincodes schalten den zugehörigen Gutscheintarif frei. Deaktivierte Tarife bleiben in bestehenden Buchungen erhalten.</p>
-<button type="submit">{{ 'Änderungen speichern' if t else 'Tarif anlegen' }}</button>
+<div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">{{ 'Änderungen speichern' if t else 'Tarif anlegen' }}</button></div>
 </form>
 {% endmacro %}
-<section class="card"><h2>Tarife</h2>
-{% for t in tariffs %}<details class="detail-editor" {% if request.form.get('tariff_id') == t.id|string %}open{% endif %}><summary>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }} · {{ 'öffentlich' if t.visibility == 'public' else 'mit Code' }}{{ ' · inaktiv' if not t.active else '' }}</summary>{{ tariff_form(t) }}</details>{% else %}<p>Noch keine Tarife angelegt.</p>{% endfor %}
+<section class="card form-card"><h2>Tarife</h2>
+{% for t in tariffs %}<details class="detail-editor" {% if request.form.get('tariff_id') == t.id|string %}open{% endif %}><summary>{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }} · {{ 'öffentlich' if t.visibility == 'public' else 'nur mit Gutscheincode' }}{{ ' · deaktiviert' if not t.active else '' }}</summary>{{ tariff_form(t) }}</details>{% else %}<p>Noch keine Tarife angelegt.</p>{% endfor %}
 </section>
-<section class="card"><h2>Neuen Tarif anlegen</h2>{{ tariff_form() }}</section>
+<section class="card form-card"><h2>Neuen Tarif anlegen</h2>{{ tariff_form() }}</section>
 <a class="btn secondary" href="{{ url_for('admin_floorplan') }}">Tische & Lageplan verwalten</a>
 {% endblock %}

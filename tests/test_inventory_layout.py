@@ -17,7 +17,7 @@ def test_inventory_is_paginated_and_filters_status_in_german(mod):
     assert page.count('>Bearbeiten</a>') == 1
     assert '>reserviert</span>' in page
     page = client.get('/admin/floorplan?filter=booked').text
-    assert '>gebucht</span>' in page
+    assert '>vergeben</span>' in page
     assert '>booked<' not in page and '>held<' not in page
     page = client.get('/admin/floorplan?page=3&edit=30').text
     assert page.count('>Bearbeiten</a>') == 6

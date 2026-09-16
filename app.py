@@ -692,7 +692,7 @@ def flash_error(message):
 
 
 # The database keeps the English status values; the interface is German.
-STATUS_LABELS = {"pending": "offen", "paid": "bezahlt", "cancelled": "storniert", "free": "frei", "held": "reserviert", "booked": "gebucht"}
+STATUS_LABELS = {"pending": "offen", "paid": "bezahlt", "cancelled": "storniert", "free": "frei", "held": "reserviert", "booked": "vergeben"}
 
 
 @app.template_filter("status_label")
@@ -1939,7 +1939,7 @@ def admin_confirm_sepa(registration_id):
     else:
         outcome = finalize_paid_registration(db, registration_id, manual_sepa=True)
         if outcome in ("booked", "already_booked"):
-            flash("Zahlung bestätigt – der Tisch ist gebucht.")
+            flash("Zahlung bestätigt – der Tisch ist vergeben.")
         else:
             flash_error(
                 "Zahlungseingang kann nur für eine offene, gültige Überweisungsreservierung erfasst werden."

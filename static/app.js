@@ -345,12 +345,12 @@ async function renderPaypalButtons() {
         byId('pay-error').textContent = 'Die PayPal-Zahlung wurde abgebrochen. Du kannst sie bis zum Ende der Reservierungsfrist erneut öffnen.';
       },
       onError: () => {
-        byId('pay-error').textContent = 'Die Zahlung konnte nicht bestätigt werden. Bitte prüfe zuerst den Zahlungsstatus, bevor du es erneut versuchst.';
+        byId('pay-error').textContent = 'Die Zahlung konnte nicht bestätigt werden. Bitte prüfe zuerst den Buchungsstatus, bevor du es erneut versuchst.';
       },
     });
     await paypalButtons.render('#paypal-button-container');
   } catch (_) {
-    byId('pay-error').textContent = 'PayPal konnte nicht geöffnet werden. Bitte prüfe den Zahlungsstatus oder lade PayPal erneut.';
+    byId('pay-error').textContent = 'PayPal konnte nicht geöffnet werden. Bitte prüfe den Buchungsstatus oder lade PayPal erneut.';
     byId('reload-paypal').hidden = false;
   }
 }
@@ -370,7 +370,7 @@ async function capturePayment(orderId, originalBooking) {
       byId('payment-review-message').textContent = error.message;
     } else {
       const target = currentStep === 'expired' ? 'expired-error' : 'pay-error';
-      byId(target).textContent = error.message + ' Bitte prüfe den Zahlungsstatus. Bezahle nicht erneut, solange der Status unklar ist.';
+      byId(target).textContent = error.message + ' Bitte prüfe den Buchungsstatus. Bezahle nicht erneut, solange der Status unklar ist.';
     }
   } finally { capturing = false; }
 }

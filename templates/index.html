@@ -89,7 +89,7 @@
     <div class="booking-summary"><dl><div><dt>Tisch</dt><dd id="pay-table-label"></dd></div><div><dt>Zahlungsart</dt><dd>PayPal</dd></div><div class="summary-total"><dt>Gesamtbetrag</dt><dd id="pay-price-label"></dd></div></dl></div>
     <div id="paypal-button-container"></div>
     <p id="pay-error" class="error" role="alert"></p>
-    <div class="booking-form-actions"><button id="reload-paypal" type="button" class="secondary" hidden>PayPal erneut laden</button><button id="retry-payment" type="button" class="secondary">Zahlungsstatus prüfen</button></div>
+    <div class="booking-form-actions"><button id="reload-paypal" type="button" class="secondary" hidden>PayPal erneut laden</button><button id="retry-payment" type="button" class="secondary">Buchungsstatus prüfen</button></div>
   </section>
 
   <section id="step-sepa-pending" class="card" hidden aria-labelledby="sepa-heading">
@@ -113,9 +113,9 @@
   <section id="step-expired" class="card" hidden aria-labelledby="expired-heading">
     <h2 id="expired-heading" tabindex="-1">Reservierung beendet</h2>
     <p>Die Reservierung für Tisch <strong id="expired-table"></strong> ist abgelaufen oder wurde storniert. Der Tisch ist nicht mehr für dich reserviert.</p>
-    <p id="expired-payment-hint" class="hint">Falls du bereits bezahlt hast, prüfe zuerst den Zahlungsstatus. Bezahle nicht erneut, solange der Zahlungseingang unklar ist.</p>
+    <p id="expired-payment-hint" class="hint">Falls du bereits bezahlt hast, prüfe zuerst den Buchungsstatus. Bezahle nicht erneut, solange der Zahlungseingang unklar ist.</p>
     <p id="expired-error" class="error" role="alert"></p>
-    <div class="booking-form-actions"><button type="button" id="check-expired" class="secondary">Zahlungsstatus prüfen</button><button type="button" data-new-booking>Zur Tischauswahl</button></div>
+    <div class="booking-form-actions"><button type="button" class="secondary" data-new-booking>Weiteren Tisch auswählen</button><button type="button" id="check-expired">Buchungsstatus prüfen</button></div>
   </section>
 
   <section id="step-done" class="card" hidden aria-labelledby="done-heading">

@@ -3,20 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin-Login – Flohmarkt</title>
+<title>Admin – Anmelden</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
-  <div class="wrap narrow">
-    <h1>Admin-Login</h1>
+<body class="admin-body">
+  <main class="admin-login">
+    <p class="admin-brand">Flohmarkt <span>Verwaltung</span></p>
     {% include "_flashes.html" %}
     <div class="card">
+      <h1>Anmelden</h1>
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>Passwort<input type="password" name="password" autofocus required></label>
+        <label>Passwort<input type="password" name="password" autocomplete="current-password" autofocus required></label>
         <button type="submit">Anmelden</button>
       </form>
     </div>
-  </div>
+  </main>
 </body>
 </html>

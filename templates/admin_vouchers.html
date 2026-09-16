@@ -12,7 +12,8 @@
         <input type="hidden" name="action" value="create">
         <label>Code<input type="text" name="code" placeholder="z. B. MITGLIEDER2026" required></label>
         <label>Max. Nutzungen<input type="number" name="max_uses" value="1" min="1"></label>
-        <label>Tarif<select name="tariff_id" required>{% for t in tariffs %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}</select></label><button type="submit" {% if not tariffs %}disabled{% endif %}>Anlegen</button>
+        <label>Tarif<select name="tariff_id" required>{% for t in tariffs %}<option value="{{ t.id }}">{{ t.name }} · {{ (t.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}</select></label>
+        <button type="submit" {% if not tariffs %}disabled{% endif %}>Anlegen</button>
       </form>
     </div>
 
@@ -40,7 +41,7 @@
               <th>Genutzt</th>
               <th>Status</th>
               <th>Erstellt am</th>
-              <th></th>
+              <th>Aktionen</th>
             </tr>
           </thead>
           <tbody>

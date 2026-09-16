@@ -5,19 +5,20 @@ function updateNavigation() { if (navigation) navigation.open = !mobile.matches;
 updateNavigation();
 mobile.addEventListener('change', updateNavigation);
 
-// Native details keeps row actions accessible without JS or overlay clipping.
-document.querySelectorAll('.action-menu').forEach(menu => {
-  menu.addEventListener('toggle', () => {
-    if (menu.open) document.querySelectorAll('.action-menu').forEach(other => {
-      if (other !== menu) other.open = false;
-    });
-  });
-});
-document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') document.querySelectorAll('.action-menu[open]').forEach(menu => {
-    menu.open = false;
-    menu.querySelector('summary').focus();
-  });
+// Tarifformular: Tischauswahl nur bei eingeschränkter Gültigkeit, Zuweisung nur
+// bei öffentlichen Tarifen. Ohne JS bleibt alles sichtbar.
+document.querySelectorAll('form[data-tariff-form]').forEach(form => {
+  const scope = form.querySelector('select[name=scope]');
+  const visibility = form.querySelector('select[name=visibility]');
+  const tableOptions = form.querySelector('[data-tariff-tables]');
+  const assign = form.querySelector('[data-tariff-assign]');
+  function update() {
+    if (tableOptions) tableOptions.hidden = scope.value !== 'selected';
+    if (assign) assign.hidden = visibility.value !== 'public';
+  }
+  scope?.addEventListener('change', update);
+  visibility?.addEventListener('change', update);
+  update();
 });
 const tabs = [...document.querySelectorAll('.email-tabs [role=tab]')];
 function selectTab(tab) {

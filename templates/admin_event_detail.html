@@ -1,5 +1,5 @@
 {% extends "admin_base.html" %}
-{% block title %}Archiv – {{ event.name }}{% endblock %}
+{% block title %}Admin – Archiv: {{ event.name }}{% endblock %}
 {% block heading %}{{ event.name }}{% endblock %}
 {% block content %}
 <a class="btn secondary" href="{{ url_for('admin_event') }}">← Zurück zu Veranstaltungen</a>
@@ -10,18 +10,17 @@
       Dieser Flohmarkt ist abgeschlossen; Buchungen lassen sich hier nicht mehr ändern.</p>
 
     {% if snapshot.stats %}
-    <div class="stats">
-      <span>Anmeldungen: <strong>{{ snapshot.stats.registrations }}</strong></span>
-      <span>bezahlt: <strong>{{ snapshot.stats.paid }}</strong></span>
-      <span>Einnahmen: <strong>{{ snapshot.stats.revenue|admin_money }} {{ currency }}</strong></span>
-      <span>Tische damals: <strong>{{ snapshot.get('num_tables', '–') }}</strong></span>
+    <div class="stats stat-cards">
+    {% for label, value in [('Anmeldungen', snapshot.stats.registrations), ('Bezahlt', snapshot.stats.paid), ('Einnahmen', snapshot.stats.revenue|admin_money ~ ' ' ~ currency), ('Tische damals', snapshot.get('num_tables', '–'))] %}
+    <div><span>{{ label }}</span><strong>{{ value }}</strong></div>
+    {% endfor %}
     </div>
     {% endif %}
 
     {% if snapshot.get('tariffs') %}
     <section class="card"><h2>Preise & Fristen dieser Veranstaltung</h2>
     <p>Zahlungsfrist bei Überweisung: {{ snapshot.get('sepa_hold_hours') or '–' }} Stunden{% if snapshot.get('payment_cutoff') %} · Spätester Termin: {{ snapshot.payment_cutoff|admin_datetime }}{% endif %}</p>
-    <ul>{% for tariff in snapshot.tariffs %}<li>{{ tariff.name }}: {{ (tariff.amount_cents / 100)|admin_money }} {{ currency }} · {{ 'öffentlich' if tariff.visibility == 'public' else 'mit Gutscheincode' }}{{ ' · deaktiviert' if not tariff.active else '' }}</li>{% endfor %}</ul></section>
+    <ul>{% for tariff in snapshot.tariffs %}<li>{{ tariff.name }}: {{ (tariff.amount_cents / 100)|admin_money }} {{ currency }} · {{ 'öffentlich' if tariff.visibility == 'public' else 'nur mit Gutscheincode' }}{{ ' · deaktiviert' if not tariff.active else '' }}</li>{% endfor %}</ul></section>
     {% endif %}
     {% if floorplan_image_url %}
     <div class="card">
@@ -68,7 +67,7 @@
               <td>{{ r.voucher_code or "–" }}</td>
               <td><span class="badge {{ r.status }}">{{ r.status|status_label }}</span>
                 {% if r.payment_received_at and r.status != 'paid' %}<br>Zahlungseingang erfasst{% endif %}
-                {% if r.payment_review %}<p class="error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% endif %}
+                {% if r.payment_review %}<span class="cell-detail error-text">Zahlung prüfen: Zuordnung oder Erstattung klären.</span>{% endif %}
               </td>
               <td>{{ r.created_at|admin_datetime }}</td>
             </tr>

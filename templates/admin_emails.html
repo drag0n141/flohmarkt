@@ -24,7 +24,7 @@
 
     <div class="card form-card email-panel" id="email-sepa" aria-labelledby="tab-sepa">
       <h2>Überweisungs-Hinweis</h2>
-      <p class="hint">Wird sofort nach der Reservierung verschickt, wenn "Überweisung" als
+      <p class="hint">Wird sofort nach der Reservierung verschickt, wenn „Überweisung“ als
         Zahlungsart gewählt wurde. Hier gehören die Bankdaten (IBAN/BIC/Kontoinhaber) fest in
         den Text – sie sind nirgendwo sonst hinterlegt. Verfügbare Platzhalter:
         <code>{{ '{{name}}' }}</code>, <code>{{ '{{tisch}}' }}</code>, <code>{{ '{{preis}}' }}</code>,
@@ -45,7 +45,7 @@
         falls bis dahin noch nicht bezahlt wurde – nur einmal pro Reservierung
         {% if sepa_hold_hours <= 24 %}
         (aktuell <strong>deaktiviert</strong>, da die Zahlungsfrist mit {{ sepa_hold_hours }}h
-        nicht länger als 24h ist – ein "24h vorher" ergibt dann keinen Sinn).
+        nicht länger als 24h ist – ein „24h vorher“ ergibt dann keinen Sinn).
         {% else %}
         .
         {% endif %}
