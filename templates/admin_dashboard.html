@@ -73,9 +73,14 @@
 </table></div></section>
 {% endif %}
 <dialog id="booking-detail-panel" class="detail-panel" aria-labelledby="detail-panel-title">
-  <header class="detail-panel-header"><h2 id="detail-panel-title">Buchungsdetails</h2><button type="button" id="close-detail-panel" class="secondary" autofocus>Schließen</button></header>
+  <header class="detail-panel-header">
+    <h2 id="detail-panel-title">Buchungsdetails</h2>
+    <div class="detail-panel-actions">
+      <a id="detail-panel-full-page" class="btn secondary" aria-label="Als vollständige Seite öffnen">Vollständige Seite</a>
+      <button type="button" id="close-detail-panel" class="secondary" autofocus>Schließen</button>
+    </div>
+  </header>
   <p id="detail-panel-status" role="status"></p>
-  <a id="detail-panel-full-page" class="detail-full-page">Als vollständige Seite öffnen</a>
   <div id="detail-panel-body"></div>
 </dialog>
 {% endblock %}
