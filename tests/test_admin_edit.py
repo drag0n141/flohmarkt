@@ -372,3 +372,29 @@ def test_restore_reserves_voucher_again(mod):
     with connect(mod) as db:
         assert db.execute("SELECT used_count FROM vouchers").fetchone()[0] == 1
     assert get_reg(mod)["status"] == "pending"
+
+
+def test_restore_can_record_late_bank_transfer_in_one_step(mod):
+    client, headers = admin(mod)
+    register(client, headers, table=1, payment_method="sepa")
+    assert cancel(client, headers).status_code == 302
+    assert get_reg(mod)["payment_received_at"] is None
+    page = client.get("/admin/registrations/1/edit").text
+    assert 'name="payment_received"' in page and "checked disabled" not in page
+    assert (
+        edit(
+            client,
+            headers,
+            version=get_reg(mod)["edit_version"],
+            action="restore",
+            table="7",
+            payment_received="yes",
+        ).status_code
+        == 302
+    )
+    reg = get_reg(mod)
+    assert reg["status"] == "paid"
+    assert reg["payment_received_at"]
+    assert reg["expires_at"] is None
+    assert table_row(mod, 7)["status"] == "booked"
+    assert table_row(mod, 7)["registration_id"] == 1
