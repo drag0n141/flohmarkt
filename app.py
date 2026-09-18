@@ -767,6 +767,71 @@ def cancel_registration_locked(db, reg):
     return True
 
 
+def updated_table_number(db, reg):
+    return db.execute("SELECT number FROM tables WHERE id=?", (reg["table_id"],)).fetchone()[0]
+
+
+def free_table_by_number(db, number):
+    """Resolve a submitted table number to a free, active table of the current event."""
+    if len(number) > 10 or not number.isdecimal() or not 1 <= int(number) <= 2147483647:
+        raise BadRequest("Bitte einen gültigen Zieltisch auswählen.")
+    target = db.execute(
+        "SELECT * FROM tables WHERE number=? AND active=1 AND event_id=?",
+        (int(number), active_event_id(db)),
+    ).fetchone()
+    if target is None or target["status"] != "free":
+        raise BadRequest("Der Zieltisch ist nicht mehr frei. Bitte wähle einen anderen Tisch.")
+    return target
+
+
+def restore_registration_locked(db, reg, form):
+    """Give a cancelled booking from the history a free table again (write lock held).
+
+    Money already recorded makes the booking 'paid' and the table 'booked';
+    otherwise the booking becomes 'pending' with a fresh payment deadline.
+    Price, voucher and bank transfer reference of the original booking are kept.
+    """
+    if reg["status"] != "cancelled":
+        raise BadRequest("Nur stornierte Buchungen können einem Tisch zugewiesen werden.")
+    target = free_table_by_number(db, form.get("table", ""))
+    target_tariff = tariff_for(db, target)
+    if target_tariff["amount_cents"] != round(reg["price"] * 100) and form.get("keep_price") != "yes":
+        raise BadRequest(
+            f"Der Zieltisch kostet regulär {target_tariff['amount_cents'] / 100:.2f} {CURRENCY}. Bitte die Zuweisung zum bisherigen Buchungspreis ausdrücklich bestätigen."
+        )
+    if reg["voucher_code"]:
+        _, error = reserve_voucher(db, reg["voucher_code"])
+        if error:
+            raise BadRequest(f"Der Gutschein {reg['voucher_code']} kann nicht erneut eingelöst werden: {error}")
+    now = utcnow().isoformat()
+    # Money that arrived after the hold expired (bank transfer) can be recorded
+    # in the same step instead of restoring first and confirming afterwards.
+    paid = bool(reg["payment_received_at"]) or form.get("payment_received") == "yes"
+    if paid:
+        db.execute(
+            "UPDATE registrations SET status='paid', table_id=?, payment_review=0, expires_at=NULL, "
+            "payment_received_at=COALESCE(payment_received_at, ?) WHERE id=?",
+            (target["id"], now, reg["id"]),
+        )
+        cur = db.execute(
+            "UPDATE tables SET status='booked', held_at=?, registration_id=? WHERE id=? AND status='free'",
+            (now, reg["id"], target["id"]),
+        )
+    else:
+        expires_at = booking_expiry(db, reg["payment_method"], now)
+        db.execute(
+            "UPDATE registrations SET status='pending', table_id=?, expires_at=? WHERE id=?",
+            (target["id"], expires_at, reg["id"]),
+        )
+        cur = db.execute(
+            "UPDATE tables SET status='held', held_at=?, registration_id=? WHERE id=? AND status='free'",
+            (now, reg["id"], target["id"]),
+        )
+    if cur.rowcount != 1:
+        raise RuntimeError("Table ownership changed inside a write transaction")
+    return paid
+
+
 def release_stale_holds(db):
     with write_transaction(db):
         now = utcnow()
@@ -1887,21 +1952,7 @@ def admin_edit_registration(registration_id):
                             ),
                         )
                     else:
-                        number = request.form.get("table", "")
-                        if (
-                            len(number) > 10
-                            or not number.isdecimal()
-                            or not 1 <= int(number) <= 2147483647
-                        ):
-                            raise BadRequest("Bitte einen gültigen Zieltisch auswählen.")
-                        target = db.execute(
-                            "SELECT * FROM tables WHERE number=? AND active=1 AND event_id=?",
-                            (int(number), active_event_id(db)),
-                        ).fetchone()
-                        if target is None or target["status"] != "free":
-                            raise BadRequest(
-                                "Der Zieltisch ist nicht mehr frei. Bitte wähle einen anderen Tisch."
-                            )
+                        target = free_table_by_number(db, request.form.get("table", ""))
                         target_tariff = tariff_for(db, target)
                         if (
                             target_tariff["amount_cents"] != round(reg["price"] * 100)
@@ -1923,6 +1974,8 @@ def admin_edit_registration(registration_id):
                             "UPDATE registrations SET table_id=? WHERE id=?",
                             (target["id"], registration_id),
                         )
+                elif action == "restore":
+                    restore_registration_locked(db, reg, request.form)
                 else:
                     raise BadRequest("Unbekannte Aktion.")
                 db.execute(
@@ -1933,9 +1986,16 @@ def admin_edit_registration(registration_id):
                     "SELECT * FROM registrations WHERE id=?", (registration_id,)
                 ).fetchone()
                 refresh_pending_emails(db, updated)
-            flash(
-                "Änderung gespeichert. Noch nicht versendete E-Mails wurden aktualisiert. Bitte informiere den Teilnehmer bei Bedarf über die Änderung."
-            )
+            if action == "restore":
+                flash(
+                    f"Buchung wiederhergestellt: Tisch {updated_table_number(db, updated)} ist jetzt "
+                    + ("vergeben." if updated["status"] == "paid" else f"bis {display_deadline(updated)} reserviert.")
+                    + " Es wird keine E-Mail automatisch versendet – bitte informiere den Teilnehmer."
+                )
+            else:
+                flash(
+                    "Änderung gespeichert. Noch nicht versendete E-Mails wurden aktualisiert. Bitte informiere den Teilnehmer bei Bedarf über die Änderung."
+                )
             return redirect(url_for("admin_edit_registration", registration_id=registration_id))
         except BadRequest as exc:
             error, status = exc.description, 400
