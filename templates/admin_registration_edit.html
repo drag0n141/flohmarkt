@@ -75,7 +75,7 @@
   <details class="card form-card detail-editor" open>
     <summary>Freien Tisch zuweisen</summary>
     <p>Die stornierte Buchung wird mit dem bisherigen Preis{% if reg.voucher_code %}, dem Gutschein {{ reg.voucher_code }}{% endif %}{% if reg.payment_method == 'sepa' %} und der bisherigen Zahlungsreferenz{% endif %} wiederhergestellt.
-      {% if reg.payment_received_at %}Da ein Zahlungseingang erfasst ist, wird der Tisch direkt als vergeben markiert.{% else %}Die Buchung wird als offen mit neuer Zahlungsfrist angelegt.{% endif %}
+      {% if reg.payment_received_at %}Da ein Zahlungseingang erfasst ist, wird der Tisch direkt als vergeben markiert.{% else %}Ohne Zahlungseingang wird die Buchung als offen mit neuer Zahlungsfrist angelegt.{% endif %}
       Es wird keine E-Mail automatisch versendet.</p>
     {% if free_tables %}
     <form method="post">
@@ -86,6 +86,7 @@
         <option value="">Bitte auswählen</option>
         {% for table in free_tables %}<option value="{{ table.number }}" {% if table.number == reg.table_number %}selected{% endif %}>Tisch {{ table.number }} · regulär {{ (table.amount_cents / 100)|admin_money }} {{ currency }}</option>{% endfor %}
       </select></label>
+      <label class="radio-inline"><input type="checkbox" name="payment_received" value="yes" {% if reg.payment_received_at %}checked disabled{% endif %}>Zahlung ist bereits eingegangen – Tisch direkt als vergeben markieren</label>
       <label class="radio-inline"><input type="checkbox" name="keep_price" value="yes">Bei abweichendem Tarif den bisherigen Buchungspreis von {{ reg.price|admin_money }} {{ currency }} beibehalten</label><div class="form-actions"><button type="reset" class="secondary">Zurücksetzen</button><button type="submit">Tisch zuweisen</button></div>
     </form>
     {% else %}<p>Derzeit ist kein Tisch frei.</p>{% endif %}
