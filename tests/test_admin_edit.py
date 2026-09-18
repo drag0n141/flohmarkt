@@ -286,3 +286,89 @@ def test_postponed_reminder_reappears_at_new_deadline(mod, monkeypatch):
         rows = db.execute("SELECT * FROM email_outbox WHERE kind='reminder'").fetchall()
         assert len(rows) == 1
         assert mod.display_deadline(get_reg(mod)) in rows[0]["body"]
+
+
+def cancel(client, headers, reg_id=1):
+    return client.post(f"/admin/cancel/{reg_id}", headers=headers)
+
+
+def table_row(mod, number):
+    with connect(mod) as db:
+        return db.execute("SELECT * FROM tables WHERE number=?", (number,)).fetchone()
+
+
+def test_history_offers_restore_and_restores_open_booking(mod):
+    client, headers = admin(mod)
+    register(client, headers, table=1, payment_method="sepa")
+    assert cancel(client, headers).status_code == 302
+    history = client.get("/admin?view=history").text
+    assert "Tisch zuweisen" in history
+    page = client.get("/admin/registrations/1/edit").text
+    assert "Freien Tisch zuweisen" in page
+    assert "Tischwechsel speichern" not in page
+
+    assert edit(client, headers, version=get_reg(mod)["edit_version"], action="restore", table="5").status_code == 302
+    reg = get_reg(mod)
+    assert reg["status"] == "pending"
+    assert reg["table_id"] == table_row(mod, 5)["id"]
+    assert datetime.fromisoformat(reg["expires_at"]) > mod.utcnow()
+    assert reg["payment_reference"] == "FLOHMARKT-1"
+    assert reg["edit_version"] == 1
+    assert table_row(mod, 5)["status"] == "held"
+    assert table_row(mod, 5)["registration_id"] == 1
+    assert table_row(mod, 1)["status"] == "free"
+    assert "Tisch 5" in client.get("/admin").text
+
+
+def test_restore_with_recorded_payment_books_table_and_clears_review(mod):
+    client, headers = admin(mod)
+    register(client, headers, table=2, payment_method="sepa")
+    assert client.post("/admin/confirm-sepa/1", headers=headers).status_code == 302
+    assert get_reg(mod)["status"] == "paid"
+    assert cancel(client, headers).status_code == 302
+    reg = get_reg(mod)
+    assert reg["status"] == "cancelled" and reg["payment_review"] == 1
+
+    assert edit(client, headers, version=get_reg(mod)["edit_version"], action="restore", table="2").status_code == 302
+    reg = get_reg(mod)
+    assert reg["status"] == "paid"
+    assert reg["payment_review"] == 0
+    assert table_row(mod, 2)["status"] == "booked"
+    assert table_row(mod, 2)["registration_id"] == 1
+
+
+def test_restore_rejects_occupied_table_and_active_booking(mod):
+    client, headers = admin(mod)
+    register(client, headers, table=1, payment_method="sepa")
+    assert cancel(client, headers).status_code == 302
+    other, other_headers = client_for(mod)
+    register(other, other_headers, table=3, payment_method="sepa")
+    resp = edit(client, headers, version=get_reg(mod)["edit_version"], action="restore", table="3")
+    assert resp.status_code == 400
+    assert "nicht mehr frei" in resp.text
+    assert get_reg(mod)["status"] == "cancelled"
+    assert table_row(mod, 1)["status"] == "free"
+    # An active booking cannot be "restored".
+    resp = edit(client, headers, reg_id=2, version=0, action="restore", table="4")
+    assert resp.status_code == 400
+    assert "Nur stornierte" in resp.text
+    assert table_row(mod, 4)["status"] == "free"
+
+
+def test_restore_reserves_voucher_again(mod):
+    client, headers = admin(mod)
+    with connect(mod) as db:
+        tariff = db.execute("SELECT id FROM tariffs WHERE name='Intern'").fetchone()["id"]
+        db.execute(
+            "INSERT INTO vouchers(code,max_uses,used_count,active,created_at,tariff_id) VALUES ('ONCE',1,0,1,?,?)",
+            (mod.utcnow().isoformat(), tariff),
+        )
+    register(client, headers, table=1, payment_method="sepa", voucher="ONCE")
+    assert get_reg(mod)["voucher_code"] == "ONCE"
+    assert cancel(client, headers).status_code == 302
+    with connect(mod) as db:
+        assert db.execute("SELECT used_count FROM vouchers").fetchone()[0] == 0
+    assert edit(client, headers, version=get_reg(mod)["edit_version"], action="restore", table="6").status_code == 302
+    with connect(mod) as db:
+        assert db.execute("SELECT used_count FROM vouchers").fetchone()[0] == 1
+    assert get_reg(mod)["status"] == "pending"
