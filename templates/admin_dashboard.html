@@ -76,6 +76,7 @@
                 </form>
                 {% endif %}
 
+{% if r.status == 'cancelled' %}<a class="btn small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail>Tisch zuweisen</a>{% endif %}
 <a class="btn secondary small" href="{{ url_for('admin_edit_registration', registration_id=r.id) }}" data-booking-detail>Details</a></div></td>
 </tr>{% else %}<tr><td colspan="6">{{ 'Keine Buchungen für diese Suche gefunden.' if search or booking_filter else 'Noch keine Buchungen in dieser Ansicht.' }}</td></tr>{% endfor %}</tbody>
 </table></div></section>
