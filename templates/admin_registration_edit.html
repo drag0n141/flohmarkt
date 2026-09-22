@@ -22,6 +22,17 @@
     </dl>
     {% if reg.payment_review %}<p class="notice error">Zahlung prüfen: Zuordnung oder Erstattung klären.</p>{% elif reg.payment_received_at and reg.status != 'paid' %}<p class="hint">Zahlungseingang erfasst.</p>{% endif %}
   </div>
+  {% if reg.payment_review %}
+  <section class="card form-card">
+    <h2>Zahlung klären</h2>
+    <p>Bestätige hier, wenn die Zahlung außerhalb der Anwendung geklärt wurde. Es wird keine Erstattung ausgelöst.</p>
+    <form method="post" action="{{ url_for('admin_resolve_payment', registration_id=reg.id) }}"
+          onsubmit="return confirm('Ist die Zahlung außerhalb der Anwendung geklärt? Hier wird keine Erstattung ausgelöst.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="small">Klärung erledigt</button>
+    </form>
+  </section>
+  {% endif %}
   <details class="detail-help">
     <summary>Hinweise zu Änderungen</summary>
     <p class="hint">Noch nicht versendete E-Mails werden mit den aktuellen Buchungsdaten neu vorbereitet. Bereits versendete Nachrichten werden nicht erneut verschickt. Bitte informiere den Teilnehmer bei Bedarf selbst.</p>
