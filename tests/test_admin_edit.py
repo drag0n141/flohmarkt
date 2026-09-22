@@ -302,7 +302,8 @@ def test_history_offers_restore_and_restores_open_booking(mod):
     register(client, headers, table=1, payment_method="sepa")
     assert cancel(client, headers).status_code == 302
     history = client.get("/admin?view=history").text
-    assert "Tisch zuweisen" in history
+    assert "Tisch zuweisen" not in history
+    assert ">Details</a>" in history
     page = client.get("/admin/registrations/1/edit").text
     assert "Freien Tisch zuweisen" in page
     assert "Tischwechsel speichern" not in page

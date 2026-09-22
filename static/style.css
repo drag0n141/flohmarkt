@@ -308,6 +308,8 @@ code { background: #f0f1f3; padding: 2px 6px; border-radius: 4px; font-size: 13p
 .error-text { color: #96272c; }
 .booking-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 180px; }
 .booking-actions form button { width: 100%; }
+.booking-actions button, .booking-actions .btn { text-align: left; }
+.booking-actions .btn { justify-content: flex-start; }
 .admin-body .danger-zone { border-color: #e6a8ad; }
 .danger-zone h2 { color: #96272c; }
 .faq-editor > summary { cursor: pointer; font-weight: 650; padding: 4px 0; }

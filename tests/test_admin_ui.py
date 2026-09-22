@@ -135,7 +135,20 @@ def test_review_filter_preserves_late_payment_workflow(mod):
         mod.finalize_paid_registration(db, 1)
     page = client.get("/admin?filter=review").text
     assert "Zahlungsprüfung" in page
-    assert "Klärung erledigt" in page
+    assert "Klärung erledigt" not in page
+    assert ">Details</a>" in page
+    history = client.get("/admin?view=history&filter=review").text
+    assert "Klärung erledigt" not in history
+    assert "Tisch zuweisen" not in history
+    assert "Zahlungseingang erfassen" not in history
+    detail = client.get("/admin/registrations/1/edit").text
+    assert "Klärung erledigt" in detail
+    assert 'action="/admin/resolve-payment/1"' in detail
+    assert "Freien Tisch zuweisen" in detail
+    response = client.post("/admin/resolve-payment/1", headers=headers)
+    assert response.status_code == 302
+    assert get_reg(mod)["payment_review"] == 0
+    assert "Klärung erledigt" not in client.get("/admin/registrations/1/edit").text
 
 
 def test_booking_details_replace_the_action_menu(mod):
