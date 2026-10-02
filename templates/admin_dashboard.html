@@ -15,6 +15,15 @@
 <a href="{{ url_for('admin_dashboard', view='history') }}" class="{{ 'active' if view == 'history' else '' }}">Verlauf</a>
 <a href="{{ url_for('admin_dashboard', view='plan') }}" class="{{ 'active' if view == 'plan' else '' }}">Lageplan</a>
 </nav>
+{% if view != 'history' %}
+<div class="card">
+  <div class="row-actions" aria-label="Teilnehmerliste exportieren">
+    <a class="btn secondary" href="{{ url_for('admin_participants') }}" target="_blank" rel="noopener">Teilnehmerliste / PDF ↗</a>
+    <a class="btn secondary" href="{{ url_for('admin_participants', format='csv') }}">CSV für Excel</a>
+  </div>
+  <p class="hint">Alle aktiven Buchungen der aktuellen Veranstaltung, nach Tischnummer sortiert – unabhängig von Suche und Filtern.</p>
+</div>
+{% endif %}
 {% if view == 'plan' %}
     {% if floorplan_image_url %}
     <div class="card">

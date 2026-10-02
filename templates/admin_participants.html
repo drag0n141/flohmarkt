@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teilnehmerliste – {{ event.name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='participants.css') }}">
+  <script src="{{ url_for('static', filename='participants.js') }}" defer></script>
+</head>
+<body>
+  <nav class="tools" aria-label="Teilnehmerliste">
+    <a href="{{ url_for('admin_dashboard') }}">Zurück zu Buchungen</a>
+    <button type="button" id="print-participants">Drucken / als PDF speichern</button>
+    <a href="{{ url_for('admin_participants', format='csv') }}">CSV für Excel</a>
+    <p>Im Druckdialog „Als PDF speichern“ wählen. Anwesenheit und Notizen können auf dem Ausdruck handschriftlich ergänzt werden.</p>
+    <noscript>Zum Drucken oder Speichern als PDF die Druckfunktion des Browsers verwenden (Strg+P).</noscript>
+  </nav>
+  <main>
+    <header>
+      <p class="eyebrow">{{ event.name }}</p>
+      <h1>Teilnehmerliste</h1>
+      <p>{{ participants|length }} aktive Buchungen · Stand: {{ generated_at|admin_datetime }} Uhr (deutsche Ortszeit)</p>
+      <p>Nach Tischnummer sortiert · Ohne stornierte und abgelaufene Buchungen</p>
+    </header>
+    <table>
+      <colgroup><col class="table-number"><col class="name"><col class="payment"><col class="amount"><col class="attendance"><col class="notes"></colgroup>
+      <thead><tr><th scope="col">Tisch</th><th scope="col">Name</th><th scope="col">Zahlungsstatus</th><th scope="col">Offen ({{ currency }})</th><th scope="col">Anwesend</th><th scope="col">Notizen</th></tr></thead>
+      <tbody>
+      {% for row in participants %}
+        <tr>
+          <td><strong>{{ row.table_number }}</strong></td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.payment }}</td>
+          <td class="money">{{ row.outstanding|admin_money }}</td>
+          <td class="check"><span class="checkbox" aria-label="Anwesenheit zum Abhaken"></span></td>
+          <td></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">Keine aktiven Buchungen vorhanden.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="footnote">„–“ beim offenen Betrag: Betrag unbekannt oder Zahlung noch zu prüfen. Jede Zeile entspricht einer Buchung.</p>
+  </main>
+</body>
+</html>

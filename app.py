@@ -1,3 +1,4 @@
+import csv
 import hmac
 import io
 import json
@@ -22,6 +23,7 @@ import requests
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
     jsonify,
     request,
     render_template,
@@ -1851,6 +1853,73 @@ def admin_dashboard():
             "SELECT COUNT(*) FROM email_outbox WHERE sent_at IS NULL AND cancelled_at IS NULL AND last_error IS NOT NULL"
         ).fetchone()[0],
     )
+
+
+def participant_rows(db):
+    """Current participants only; cancelled payment reviews are not attendees."""
+    event = active_event(db)
+    registrations = db.execute(
+        """SELECT r.name, r.status, r.price, r.payment_received_at, r.payment_review,
+                  t.number AS table_number
+           FROM registrations r JOIN tables t ON t.id=r.table_id
+           WHERE r.event_id=? AND t.event_id=r.event_id
+             AND r.status IN ('pending', 'paid')
+           ORDER BY t.number, r.id""",
+        (event["id"],),
+    ).fetchall()
+    rows = []
+    for reg in registrations:
+        paid = reg["status"] == "paid" or bool(reg["payment_received_at"])
+        review = bool(reg["payment_review"])
+        rows.append({
+            "table_number": reg["table_number"],
+            "name": reg["name"],
+            "payment": "Zahlung prüfen" if review else "bezahlt" if paid else "offen",
+            # A payment under review has no reliably known outstanding amount.
+            "outstanding": None if review else 0 if paid else reg["price"],
+        })
+    return event, rows
+
+
+def csv_safe_cell(value):
+    """Keep user-controlled text literal when opened in spreadsheet software."""
+    text = str(value)
+    if text.lstrip().startswith(("=", "+", "-", "@")) or text.startswith(("\t", "\r", "\n")):
+        return "'" + text
+    return text
+
+
+@app.route("/admin/participants")
+@login_required
+def admin_participants():
+    export_format = request.args.get("format", "print")
+    if export_format not in ("print", "csv"):
+        raise BadRequest("Unbekanntes Exportformat.")
+    db = get_db()
+    release_stale_holds(db)
+    event, rows = participant_rows(db)
+    generated_at = utcnow().isoformat()
+    if export_format == "csv":
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow(["Tisch", "Name", "Zahlungsstatus", "Offener Betrag", "Währung", "Anwesend", "Notizen"])
+        for row in rows:
+            writer.writerow([
+                row["table_number"], csv_safe_cell(row["name"]), row["payment"],
+                "" if row["outstanding"] is None else f'{row["outstanding"]:.2f}'.replace(".", ","),
+                csv_safe_cell(CURRENCY), "", "",
+            ])
+        response = Response(output.getvalue().encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="teilnehmer-veranstaltung-{event["id"]}-{generated_at[:10]}.csv"'
+        )
+    else:
+        response = app.make_response(render_template(
+            "admin_participants.html", event=event, participants=rows,
+            generated_at=generated_at, currency=CURRENCY,
+        ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def refresh_pending_emails(db, reg):
