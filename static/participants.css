@@ -1,0 +1,38 @@
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px; color: #172232; background: #f1f4f8; font: 14px/1.5 system-ui, sans-serif; }
+main, .tools { max-width: 1200px; margin: 0 auto 20px; }
+main { background: #fff; padding: 32px; border: 1px solid #d1d8e0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.tools a, .tools button { padding: 10px 16px; border: 1px solid #64748b; border-radius: 6px; color: #172232; background: #fff; font: inherit; text-decoration: none; cursor: pointer; }
+.tools button { color: #fff; background: #263c59; }
+.tools p { flex-basis: 100%; margin: 0; }
+h1 { margin: 0 0 8px; font-size: 28px; }
+header p { margin: 4px 0; }
+.eyebrow { font-weight: 600; overflow-wrap: anywhere; }
+table { width: 100%; margin-top: 24px; border-collapse: collapse; table-layout: fixed; }
+.table-number { width: 7%; } .name { width: 25%; } .payment { width: 16%; }
+.amount { width: 12%; } .attendance { width: 11%; } .notes { width: 29%; }
+th, td { border: 1px solid #84909d; padding: 10px; text-align: left; overflow-wrap: anywhere; }
+th { background: #edf1f5; font-size: 12px; }
+td { height: 48px; vertical-align: middle; }
+.money { text-align: right; } .check { text-align: center; }
+.checkbox { display: inline-block; width: 17px; height: 17px; border: 1.5px solid #172232; vertical-align: middle; }
+.footnote { font-size: 12px; }
+@media screen and (max-width: 650px) {
+  body { padding: 12px; }
+  main { padding: 12px; overflow-x: auto; }
+  table { min-width: 760px; }
+}
+@page { size: A4 landscape; margin: 12mm; }
+@media print {
+  body { padding: 0; color: #000; background: #fff; font-size: 10pt; }
+  .tools { display: none; }
+  main { max-width: none; margin: 0; padding: 0; border: 0; }
+  h1 { font-size: 20pt; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th, td { border-color: #555; padding: 2.5mm; }
+  td { height: 12mm; }
+  th { font-size: 9pt; background: #fff; }
+  .footnote { font-size: 9pt; }
+}

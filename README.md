@@ -1,5 +1,20 @@
 # Flohmarkt – Table Registration
 
+### Teilnehmerliste für vor Ort
+
+Unter **Buchungen → Aktive Buchungen** sowie im **Lageplan** stehen zwei Exporte bereit:
+
+- **Teilnehmerliste / PDF** öffnet eine Druckansicht im A4-Querformat. Über
+  **Drucken / als PDF speichern** lässt sie sich ausdrucken oder im Browser als PDF speichern.
+- **CSV für Excel** lädt eine UTF-8-Datei mit Semikolon als Trennzeichen und deutschen Dezimalzahlen herunter.
+
+Beide enthalten alle aktiven Buchungen der aktuellen Veranstaltung, unabhängig von Suche
+und Filtern, numerisch nach Tischnummer sortiert: Tisch, Name, Zahlungsstatus, offener Betrag
+sowie freie Spalten für Anwesenheit und Notizen. Stornierte, abgelaufene und archivierte
+Buchungen sind ausgeschlossen. Unklare Zahlungen werden als **Zahlung prüfen** ohne offenen
+Betrag ausgegeben. Anwesenheit und Notizen werden auf dem Ausdruck bzw. in der CSV ergänzt;
+sie werden nicht in der Anwendung gespeichert. Die Exporte sind nur für angemeldete Admins zugänglich.
+
 A small Flask web app for allocating tables at a flea market: visitors
 register, pick a free table (either from a simple grid or an optional
 uploaded floor plan with clickable markers), and pay the table fee — either
